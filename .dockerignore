@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.git/
+uploads/
+chroma_db/
+workspace/

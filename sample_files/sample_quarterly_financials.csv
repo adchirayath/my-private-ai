@@ -1,0 +1,26 @@
+Quarter,Region,Product_Line,Units_Sold,Unit_Price_USD,Revenue_USD,Marketing_Spend_USD,Net_Profit_USD,Lead_Executive,Status
+Q1-2026,North America,Enterprise Cloud AI,450,1200,540000,65000,312000,Sarah Jenkins,Target Exceeded
+Q1-2026,North America,Edge Inference Appliance,120,3500,420000,45000,185000,Sarah Jenkins,On Track
+Q1-2026,Europe,Enterprise Cloud AI,310,1200,372000,48000,198000,Marcus Weber,On Track
+Q1-2026,Europe,Edge Inference Appliance,85,3500,297500,38000,124000,Marcus Weber,Needs Attention
+Q1-2026,Asia-Pacific,Enterprise Cloud AI,520,1200,624000,72000,380000,Kenji Takahashi,Target Exceeded
+Q1-2026,Asia-Pacific,Edge Inference Appliance,160,3500,560000,55000,270000,Kenji Takahashi,Target Exceeded
+Q1-2026,Latin America,Enterprise Cloud AI,140,1200,168000,28000,74000,Camila Morales,On Track
+Q1-2026,Latin America,Edge Inference Appliance,40,3500,140000,22000,48000,Camila Morales,On Track
+Q2-2026,North America,Enterprise Cloud AI,610,1200,732000,82000,442000,Sarah Jenkins,Target Exceeded
+Q2-2026,North America,Edge Inference Appliance,195,3500,682500,68000,340000,Sarah Jenkins,Target Exceeded
+Q2-2026,Europe,Enterprise Cloud AI,440,1200,528000,58000,310000,Marcus Weber,Target Exceeded
+Q2-2026,Europe,Edge Inference Appliance,110,3500,385000,44000,175000,Marcus Weber,On Track
+Q2-2026,Asia-Pacific,Enterprise Cloud AI,730,1200,876000,95000,535000,Kenji Takahashi,Target Exceeded
+Q2-2026,Asia-Pacific,Edge Inference Appliance,220,3500,770000,78000,410000,Kenji Takahashi,Target Exceeded
+Q2-2026,Latin America,Enterprise Cloud AI,210,1200,252000,34000,122000,Camila Morales,On Track
+Q2-2026,Latin America,Edge Inference Appliance,65,3500,227500,29000,88000,Camila Morales,On Track
+Q3-2026,North America,Enterprise Cloud AI,720,1200,864000,90000,520000,Sarah Jenkins,Target Exceeded
+Q3-2026,North America,Edge Inference Appliance,240,3500,840000,82000,430000,Sarah Jenkins,Target Exceeded
+Q3-2026,Europe,Enterprise Cloud AI,490,1200,588000,64000,345000,Marcus Weber,On Track
+Q3-2026,Europe,Edge Inference Appliance,135,3500,472500,52000,225000,Marcus Weber,On Track
+Q3-2026,Asia-Pacific,Enterprise Cloud AI,850,1200,1020000,110000,640000,Kenji Takahashi,Target Exceeded
+Q3-2026,Asia-Pacific,Edge Inference Appliance,280,3500,980000,92000,540000,Kenji Takahashi,Target Exceeded
+Q3-2026,Latin America,Enterprise Cloud AI,260,1200,312000,40000,165000,Camila Morales,On Track
+Q3-2026,Latin America,Edge Inference Appliance,80,3500,280000,34000,118000,Camila Morales,On Track
+
