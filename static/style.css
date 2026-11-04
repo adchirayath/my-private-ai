@@ -242,13 +242,39 @@ main.sidebar-collapsed aside {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: 8px 10px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.workspace-card:hover {
+  border-color: var(--border-medium);
 }
 
 .workspace-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   margin-bottom: 6px;
+  cursor: pointer;
+  user-select: none;
+  transition: margin-bottom var(--transition-fast);
+}
+
+.workspace-header:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.workspace-card.collapsed .workspace-header {
+  margin-bottom: 0;
+}
+
+.workspace-header-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .workspace-title {
@@ -260,12 +286,57 @@ main.sidebar-collapsed aside {
   display: flex;
   align-items: center;
   gap: 5px;
+  white-space: nowrap;
+  transition: color var(--transition-fast);
+}
+
+.workspace-header:hover .workspace-title {
+  color: var(--text-main);
+}
+
+.workspace-active-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 1px 7px;
+  border-radius: 999px;
+  max-width: 105px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+}
+
+.workspace-card:not(.collapsed) .workspace-active-badge {
+  display: none;
 }
 
 .workspace-header-actions {
   display: flex;
   align-items: center;
   gap: 3px;
+  flex-shrink: 0;
+}
+
+.workspace-toggle-btn .workspace-chevron-icon {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: rotate(0deg);
+}
+
+.workspace-card:not(.collapsed) .workspace-toggle-btn .workspace-chevron-icon {
+  transform: rotate(180deg);
+}
+
+.workspace-card-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-card.collapsed .workspace-card-body {
+  display: none;
 }
 
 .workspace-input-wrap {

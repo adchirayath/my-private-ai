@@ -81,6 +81,12 @@ function updateWorkspaceUI() {
       badge.textContent = `📁 ${activeWs}`;
     }
   }
+
+  const activeBadge = $("workspaceActiveBadge");
+  if (activeBadge) {
+    activeBadge.textContent = activeWs;
+    activeBadge.title = `Active workspace: ${activeWs}`;
+  }
 }
 
 /**
@@ -1304,6 +1310,53 @@ if ($("tabFilesBtn")) {
 // Search Filter on Conversation Titles
 if ($("chatSearchInput")) {
   $("chatSearchInput").addEventListener("input", applyChatFilter);
+}
+
+// Workspace Card Collapse / Expand Toggle
+const workspaceCard = $("workspaceCard");
+const workspaceToggleBtn = $("toggleWorkspaceBtn");
+const workspaceCardHeader = $("workspaceCardHeader");
+
+function toggleWorkspaceCard(forceCollapsed) {
+  if (!workspaceCard) return;
+  const isCurrentlyCollapsed = workspaceCard.classList.contains("collapsed");
+  const willBeCollapsed = (typeof forceCollapsed === "boolean")
+    ? forceCollapsed
+    : !isCurrentlyCollapsed;
+
+  workspaceCard.classList.toggle("collapsed", willBeCollapsed);
+
+  if (workspaceToggleBtn) {
+    workspaceToggleBtn.setAttribute("aria-expanded", (!willBeCollapsed).toString());
+    workspaceToggleBtn.title = willBeCollapsed ? "Expand workspace" : "Collapse workspace";
+    workspaceToggleBtn.setAttribute("aria-label", willBeCollapsed ? "Expand workspace" : "Collapse workspace");
+  }
+  if (workspaceCardHeader) {
+    workspaceCardHeader.setAttribute("aria-expanded", (!willBeCollapsed).toString());
+  }
+}
+
+if (workspaceToggleBtn) {
+  workspaceToggleBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleWorkspaceCard();
+  });
+}
+
+if (workspaceCardHeader) {
+  workspaceCardHeader.addEventListener("click", (e) => {
+    if (e.target.closest(".workspace-header-actions")) {
+      return;
+    }
+    toggleWorkspaceCard();
+  });
+
+  workspaceCardHeader.addEventListener("keydown", (e) => {
+    if ((e.key === "Enter" || e.key === " ") && !e.target.closest(".workspace-header-actions")) {
+      e.preventDefault();
+      toggleWorkspaceCard();
+    }
+  });
 }
 
 // Sidebar Collapse / Expand Toggle
