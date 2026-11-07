@@ -20,14 +20,39 @@ from core.config import (
     OLLAMA_MODEL,
     OLLAMA_EMBED_MODEL,
     OLLAMA_NUM_CTX,
+    DEFAULT_TEMPERATURE,
     MAX_HISTORY_MESSAGES,
 )
 
+import asyncio
+
 # Async HTTP Client for non-blocking Ollama communication
-ollama_http_client = httpx.AsyncClient(
-    base_url=OLLAMA_BASE_URL,
-    timeout=600.0,
-)
+_ollama_client: Optional[httpx.AsyncClient] = None
+
+
+def get_ollama_client() -> httpx.AsyncClient:
+    """Return an active AsyncClient bound to the current event loop."""
+    global _ollama_client
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if _ollama_client is None or _ollama_client.is_closed or getattr(_ollama_client, "_loop", None) != loop:
+        _ollama_client = httpx.AsyncClient(
+            base_url=OLLAMA_BASE_URL,
+            timeout=600.0,
+        )
+        _ollama_client._loop = loop
+    return _ollama_client
+
+
+class _LazyClientProxy:
+    def __getattr__(self, name):
+        return getattr(get_ollama_client(), name)
+
+
+ollama_http_client = _LazyClientProxy()
 
 
 def _format_ollama_error(exc: Exception, model_name: str) -> str:
@@ -101,20 +126,22 @@ def build_chat_messages(
     context: list[dict],
     workspace: str,
     history: Optional[list[dict]] = None,
+    system_prompt_override: Optional[str] = None,
 ) -> list[dict]:
     """
-    Format system instructions, retrieved document passages, and conversation history.
+    Format system instructions, retrieved document passages with page citations, and conversation history.
     """
     if context:
         context_blocks = []
         for item in context:
+            page_info = f" (Page: {item['page_number']})" if item.get("page_number") else ""
             context_blocks.append(
-                f"--- Document: {item['filename']} ---\n{item['text']}"
+                f"--- Document: {item['filename']}{page_info} ---\n{item['text']}"
             )
 
         context_text = "\n\n".join(context_blocks)
 
-        system_message = (
+        system_message = system_prompt_override or (
             "You are My Private AI, a helpful local AI assistant. Answer clearly and accurately. "
             "Use the supplied document excerpts when relevant to answer the user's specific question. "
             "If the user is merely greeting you (e.g. 'hi', 'hello') or making small talk, "
@@ -137,7 +164,7 @@ def build_chat_messages(
             f"Latest user question:\n{question}"
         )
     else:
-        system_message = (
+        system_message = system_prompt_override or (
             "You are My Private AI, a helpful local AI assistant. Answer clearly, politely, and honestly. "
             "Use conversation history to understand follow-up questions. "
             "No relevant document passages were retrieved for this turn, "
@@ -248,29 +275,35 @@ async def ask_ollama(
     context: list[dict],
     workspace: str,
     history: Optional[list[dict]] = None,
+    model: Optional[str] = None,
+    temperature: Optional[float] = None,
+    system_prompt_override: Optional[str] = None,
 ) -> str:
     """
-    Execute a synchronous-like chat response asynchronously.
+    Execute a synchronous-like chat response asynchronously with model and temperature control.
     """
-    messages = build_chat_messages(question, context, workspace, history)
+    chosen_model = model.strip() if model else OLLAMA_MODEL
+    temp = temperature if temperature is not None else DEFAULT_TEMPERATURE
+    messages = build_chat_messages(question, context, workspace, history, system_prompt_override)
 
     try:
         response = await ollama_http_client.post(
             "/api/chat",
             json={
-                "model": OLLAMA_MODEL,
+                "model": chosen_model,
                 "messages": messages,
                 "stream": False,
                 "options": {
                     "num_ctx": OLLAMA_NUM_CTX,
+                    "temperature": temp,
                 },
             },
         )
         response.raise_for_status()
     except httpx.HTTPError as exc:
-        formatted = _format_ollama_error(exc, OLLAMA_MODEL)
+        formatted = _format_ollama_error(exc, chosen_model)
         raise RuntimeError(
-            f"Could not contact Ollama chat model '{OLLAMA_MODEL}'. Details: {formatted}"
+            f"Could not contact Ollama chat model '{chosen_model}'. Details: {formatted}"
         ) from exc
 
     payload = response.json()
@@ -285,22 +318,29 @@ async def stream_ollama(
     context: list[dict],
     workspace: str,
     history: Optional[list[dict]] = None,
-) -> AsyncGenerator[tuple[str, bool], None]:
+    model: Optional[str] = None,
+    temperature: Optional[float] = None,
+    system_prompt_override: Optional[str] = None,
+) -> AsyncGenerator[tuple[str, bool, Optional[dict]], None]:
     """
-    Stream tokens from Ollama asynchronously. Yields (token, is_done) tuples.
+    Stream tokens from Ollama asynchronously with hardware metrics (tokens/sec).
+    Yields (token, is_done, stats) tuples.
     """
-    messages = build_chat_messages(question, context, workspace, history)
+    chosen_model = model.strip() if model else OLLAMA_MODEL
+    temp = temperature if temperature is not None else DEFAULT_TEMPERATURE
+    messages = build_chat_messages(question, context, workspace, history, system_prompt_override)
 
     try:
         async with ollama_http_client.stream(
             "POST",
             "/api/chat",
             json={
-                "model": OLLAMA_MODEL,
+                "model": chosen_model,
                 "messages": messages,
                 "stream": True,
                 "options": {
                     "num_ctx": OLLAMA_NUM_CTX,
+                    "temperature": temp,
                 },
             },
         ) as response:
@@ -312,12 +352,26 @@ async def stream_ollama(
                     chunk = json.loads(line)
                     token = chunk.get("message", {}).get("content", "")
                     done = chunk.get("done", False)
-                    yield token, done
+
+                    stats = None
+                    if done:
+                        eval_count = chunk.get("eval_count", 0)
+                        eval_duration = chunk.get("eval_duration", 0)
+                        tok_sec = (eval_count / (eval_duration / 1e9)) if eval_duration else 0.0
+                        total_duration_ms = round(chunk.get("total_duration", 0) / 1e6, 1)
+                        stats = {
+                            "tokens": eval_count,
+                            "tokens_per_second": round(tok_sec, 1),
+                            "total_duration_ms": total_duration_ms,
+                            "model": chosen_model,
+                        }
+
+                    yield token, done, stats
                 except Exception:
                     continue
     except httpx.HTTPError as exc:
-        formatted = _format_ollama_error(exc, OLLAMA_MODEL)
+        formatted = _format_ollama_error(exc, chosen_model)
         raise RuntimeError(
-            f"Could not contact Ollama streaming '{OLLAMA_MODEL}'. Details: {formatted}"
+            f"Could not contact Ollama streaming '{chosen_model}'. Details: {formatted}"
         ) from exc
 

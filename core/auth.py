@@ -99,7 +99,7 @@ def register_user(username: str, password: str) -> dict:
         )
         user_id = cursor.lastrowid
 
-        # Check total users count: if this is the very first user, claim legacy messages
+        # Check total users count: if this is the very first user, claim legacy messages and documents
         cursor = conn.execute("SELECT COUNT(*) FROM users")
         total_users = cursor.fetchone()[0]
         if total_users == 1:
@@ -107,6 +107,20 @@ def register_user(username: str, password: str) -> dict:
                 "UPDATE messages SET user_id = ? WHERE user_id IS NULL",
                 (user_id,),
             )
+            try:
+                conn.execute(
+                    "UPDATE documents SET user_id = ? WHERE user_id IS NULL",
+                    (user_id,),
+                )
+            except Exception:
+                pass
+            try:
+                conn.execute(
+                    "UPDATE chunk_fts SET user_id = ? WHERE user_id = '' OR user_id IS NULL",
+                    (str(user_id),),
+                )
+            except Exception:
+                pass
 
         conn.commit()
 
@@ -241,6 +255,6 @@ def get_current_user(request: Request) -> dict:
     if not user:
         raise HTTPException(
             status_code=401,
-            detail="Authentication required to access chat history.",
+            detail="Authentication required.",
         )
     return user

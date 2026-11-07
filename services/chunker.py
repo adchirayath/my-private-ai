@@ -81,3 +81,31 @@ def split_text(
 
     return chunks
 
+
+def split_text_with_metadata(
+    text: str,
+    chunk_size: int = 1200,
+    overlap: int = 180,
+) -> list[dict]:
+    """
+    Split long document text into overlapping chunks and detect page/slide/sheet references.
+    Returns list of dicts: {"content": str, "page_number": Optional[str]}
+    """
+    chunks = split_text(text, chunk_size=chunk_size, overlap=overlap)
+    results = []
+    current_page = None
+
+    for chunk in chunks:
+        # Check for [Page X], [Slide X], [Sheet: X] markers
+        page_match = re.search(r"\[(Page\s+\d+(?:\s+\(OCR\))?|Slide\s+\d+|Sheet:[^\]]+)\]", chunk, re.IGNORECASE)
+        if page_match:
+            current_page = page_match.group(1).strip()
+
+        results.append({
+            "content": chunk,
+            "page_number": current_page,
+        })
+
+    return results
+
+

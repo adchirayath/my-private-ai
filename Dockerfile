@@ -21,7 +21,11 @@ COPY services ./services
 COPY routers ./routers
 COPY docs ./docs
 
-RUN mkdir -p /app/uploads /app/chroma_db /app/workspace
+RUN useradd -m -u 10001 -s /bin/bash appuser \
+    && mkdir -p /app/uploads /app/chroma_db /app/workspace \
+    && chown -R appuser:appuser /app
+
+USER appuser
 
 EXPOSE 8000
 

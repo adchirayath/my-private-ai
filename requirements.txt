@@ -4,6 +4,7 @@ python-multipart
 requests
 httpx
 chromadb
+bcrypt
 pypdf
 python-docx
 python-pptx

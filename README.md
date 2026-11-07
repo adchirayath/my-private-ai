@@ -1,6 +1,6 @@
 # My Private AI
 
-> **Your private documents, your hardware, Zero Cloud.**  
+> **Your private documents, your hardware.**  
 > A 100% private, local Retrieval-Augmented Generation (RAG) assistant. Chat with your PDFs, Word docs, spreadsheets, code, and images entirely on your machine using **Ollama**, **ChromaDB**, and **FastAPI**. Zero data leaves your computer.  
 > 
 > 📖 **Visual Walkthrough:** See the 3-page printable [Beginner's Guide (PDF)](docs/beginners_guide.pdf) for an introduction to the concepts and architecture.

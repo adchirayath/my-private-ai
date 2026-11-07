@@ -8,6 +8,7 @@ from routers.auth import router as auth_router
 from routers.chat import router as chat_router
 from routers.files import router as files_router
 from routers.health import router as health_router
+from routers.models import router as models_router
 
 # Re-exports for backwards compatibility
 from services.chunker import split_text
@@ -23,11 +24,13 @@ from services.rag import (
     index_document,
     search_documents_hybrid as search_documents,
 )
+from core.config import ALLOWED_ORIGINS
 from core.db import (
     documents_collection,
     get_conversation_history,
     save_message,
     clear_conversation_history,
+    cleanup_expired_sessions,
 )
 
 # ---------------------------------------------------------
@@ -35,13 +38,14 @@ from core.db import (
 # ---------------------------------------------------------
 app = FastAPI(
     title="My Private AI",
-    description="Your private documents, your hardware, Zero Cloud",
-    version="2.0.0",
+    description="Your private documents, your hardware",
+    version="2.1.0",
 )
 
+# Setup CORS with credential-safe origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,6 +60,7 @@ app.mount(
 
 # Include Routers
 app.include_router(health_router)
+app.include_router(models_router)
 app.include_router(auth_router)
 app.include_router(files_router)
 app.include_router(chat_router)

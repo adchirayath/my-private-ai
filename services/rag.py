@@ -16,8 +16,12 @@ from collections import Counter
 from typing import Optional
 
 from core.config import RETRIEVAL_TOP_K, MAX_RETRIEVAL_DISTANCE
-from core.db import documents_collection
-from services.chunker import split_text
+from core.db import (
+    documents_collection,
+    index_fts_chunks,
+    search_fts_chunks,
+)
+from services.chunker import split_text, split_text_with_metadata
 from services.ollama import ollama_embed
 
 
@@ -126,17 +130,20 @@ async def index_document(
     file_id: str,
     filename: str,
     text: str,
+    user_id: Optional[int] = None,
 ) -> int:
     """
-    Split text into boundary-aware chunks, generate embeddings,
-    and persist into ChromaDB.
+    Split text into boundary-aware chunks with page tracking,
+    generate embeddings, and persist into ChromaDB and SQLite FTS5 (scoped to user).
     """
-    chunks = split_text(text)
-    if not chunks:
+    chunks_meta = split_text_with_metadata(text)
+    if not chunks_meta:
         raise ValueError("No readable text was extracted from this file.")
 
+    chunks = [c["content"] for c in chunks_meta]
     embeddings = await ollama_embed(chunks, prefix="search_document: ")
 
+    uid_val = int(user_id) if user_id is not None else 0
     ids = [f"{file_id}-{i}" for i in range(len(chunks))]
     metadatas = [
         {
@@ -144,6 +151,8 @@ async def index_document(
             "file_id": file_id,
             "filename": filename,
             "chunk_index": i,
+            "page_number": chunks_meta[i].get("page_number") or "",
+            "user_id": uid_val,
         }
         for i in range(len(chunks))
     ]
@@ -154,21 +163,37 @@ async def index_document(
         embeddings=embeddings,
         metadatas=metadatas,
     )
+
+    # Fast persistent SQLite FTS5 index for BM25 ranking (scoped to user)
+    fts_chunks = [
+        {
+            "id": ids[i],
+            "content": chunks[i],
+            "page_number": chunks_meta[i].get("page_number") or "",
+        }
+        for i in range(len(chunks))
+    ]
+    try:
+        index_fts_chunks(workspace, file_id, filename, fts_chunks, user_id=user_id)
+    except Exception:
+        pass
+
     return len(chunks)
 
 
 # ---------------------------------------------------------
-# Hybrid Search (BM25 + ChromaDB + Reciprocal Rank Fusion)
+# Hybrid Search (BM25 via SQLite FTS5 + ChromaDB + Reciprocal Rank Fusion)
 # ---------------------------------------------------------
 async def search_documents_hybrid(
     workspace: str,
     question: str,
     top_k: int = RETRIEVAL_TOP_K,
+    user_id: Optional[int] = None,
 ) -> list[dict]:
     """
     Performs hybrid retrieval combining:
-    1. Dense semantic vectors from ChromaDB
-    2. Sparse BM25 keyword matching (for exact terms, part numbers, names, IDs)
+    1. Dense semantic vectors from ChromaDB (scoped to user)
+    2. Sub-millisecond sparse BM25 keyword matching via SQLite FTS5 (scoped to user)
     3. Merged via Reciprocal Rank Fusion (RRF).
     """
     if is_greeting_or_smalltalk(question):
@@ -180,6 +205,12 @@ async def search_documents_hybrid(
 
     safe_top_k = max(1, min(top_k * 3, total_elements, 30))
 
+    where_filter = (
+        {"$and": [{"workspace": workspace}, {"user_id": int(user_id)}]}
+        if user_id is not None
+        else {"workspace": workspace}
+    )
+
     # 1. Dense Semantic Query
     query_embeddings = await ollama_embed([question], prefix="search_query: ")
     query_emb = query_embeddings[0] if query_embeddings else None
@@ -187,13 +218,14 @@ async def search_documents_hybrid(
     dense_candidates = []
     dense_id_to_rank = {}
     dense_id_to_dist = {}
+    chunk_catalog = {}
 
     if query_emb:
         try:
             dense_res = documents_collection.query(
                 query_embeddings=[query_emb],
                 n_results=safe_top_k,
-                where={"workspace": workspace},
+                where=where_filter,
                 include=["documents", "metadatas", "distances"],
             )
             dense_ids = dense_res.get("ids", [[]])[0]
@@ -206,51 +238,71 @@ async def search_documents_hybrid(
             ):
                 dense_id_to_rank[doc_id] = rank
                 dense_id_to_dist[doc_id] = dist
-                dense_candidates.append({
+                chunk_catalog[doc_id] = {
                     "id": doc_id,
                     "text": doc,
                     "filename": meta.get("filename", "unknown"),
                     "file_id": meta.get("file_id", ""),
+                    "page_number": meta.get("page_number", ""),
                     "distance": dist,
-                })
+                }
+                dense_candidates.append(chunk_catalog[doc_id])
         except Exception:
             pass
 
-    # 2. Sparse BM25 Query on Workspace Chunks
-    all_ws_data = documents_collection.get(
-        where={"workspace": workspace},
-        include=["documents", "metadatas"],
-    )
-    ws_ids = all_ws_data.get("ids", [])
-    ws_docs = all_ws_data.get("documents", [])
-    ws_metas = all_ws_data.get("metadatas", [])
-
+    # 2. Sparse BM25 Query: Try fast SQLite FTS5 index first (scoped to user)
     bm25_id_to_rank = {}
-    chunk_catalog = {}
-
-    for doc_id, doc, meta in zip(ws_ids, ws_docs, ws_metas):
-        chunk_catalog[doc_id] = {
-            "id": doc_id,
-            "text": doc,
-            "filename": meta.get("filename", "unknown"),
-            "file_id": meta.get("file_id", ""),
-            "distance": dense_id_to_dist.get(doc_id, None),
-        }
-
-    if ws_docs:
-        bm25 = BM25Index()
-        bm25.fit(ws_docs)
-        scores = bm25.get_scores(question)
-
-        # Pair with ids and sort by score descending
-        scored_pairs = [(ws_ids[i], s) for i, s in enumerate(scores) if s > 0.0]
-        scored_pairs.sort(key=lambda x: x[1], reverse=True)
-
-        for rank, (doc_id, _) in enumerate(scored_pairs[:safe_top_k], start=1):
+    try:
+        fts_matches = search_fts_chunks(workspace, question, limit=safe_top_k, user_id=user_id)
+        for rank, match in enumerate(fts_matches, start=1):
+            doc_id = match["id"]
             bm25_id_to_rank[doc_id] = rank
+            if doc_id not in chunk_catalog:
+                chunk_catalog[doc_id] = {
+                    "id": doc_id,
+                    "text": match["text"],
+                    "filename": match["filename"],
+                    "file_id": match["file_id"],
+                    "page_number": match.get("page_number", ""),
+                    "distance": dense_id_to_dist.get(doc_id, None),
+                }
+    except Exception:
+        pass
+
+    # Fallback to in-memory BM25 if FTS5 had no matches but chunks exist
+    if not bm25_id_to_rank:
+        try:
+            all_ws_data = documents_collection.get(
+                where=where_filter,
+                include=["documents", "metadatas"],
+            )
+            ws_ids = all_ws_data.get("ids", [])
+            ws_docs = all_ws_data.get("documents", [])
+            ws_metas = all_ws_data.get("metadatas", [])
+
+            for doc_id, doc, meta in zip(ws_ids, ws_docs, ws_metas):
+                if doc_id not in chunk_catalog:
+                    chunk_catalog[doc_id] = {
+                        "id": doc_id,
+                        "text": doc,
+                        "filename": meta.get("filename", "unknown"),
+                        "file_id": meta.get("file_id", ""),
+                        "page_number": meta.get("page_number", ""),
+                        "distance": dense_id_to_dist.get(doc_id, None),
+                    }
+
+            if ws_docs:
+                bm25 = BM25Index()
+                bm25.fit(ws_docs)
+                scores = bm25.get_scores(question)
+                scored_pairs = [(ws_ids[i], s) for i, s in enumerate(scores) if s > 0.0]
+                scored_pairs.sort(key=lambda x: x[1], reverse=True)
+                for rank, (doc_id, _) in enumerate(scored_pairs[:safe_top_k], start=1):
+                    bm25_id_to_rank[doc_id] = rank
+        except Exception:
+            pass
 
     # 3. Reciprocal Rank Fusion (RRF)
-    # RRF score = sum(1 / (60 + rank))
     all_candidate_ids = set(dense_id_to_rank.keys()) | set(bm25_id_to_rank.keys())
     rrf_scores = []
 
@@ -273,16 +325,20 @@ async def search_documents_hybrid(
 
     rrf_scores.sort(key=lambda x: x[1], reverse=True)
 
-    # Return top_k merged results
+    # Return top_k merged results with rich snippet & page citation metadata
     final_matches = []
-    for doc_id, _ in rrf_scores[:top_k]:
+    for doc_id, score_val in rrf_scores[:top_k]:
         item = chunk_catalog.get(doc_id)
         if item:
+            snippet = item["text"][:280] + ("…" if len(item["text"]) > 280 else "")
             final_matches.append({
                 "text": item["text"],
                 "filename": item["filename"],
                 "file_id": item["file_id"],
-                "distance": item["distance"],
+                "page_number": item.get("page_number") or None,
+                "distance": item.get("distance"),
+                "snippet": snippet,
+                "score": round(score_val, 4),
             })
 
     return final_matches
