@@ -7,7 +7,7 @@
 
   <!-- Local Offline CSS Assets -->
   <link rel="stylesheet" href="/static/highlight.min.css">
-  <link rel="stylesheet" href="/static/style.css?v=2.0.1">
+  <link rel="stylesheet" href="/static/style.css?v=2.1.0">
 
   <!-- Local Offline JS Libraries (Markdown & Syntax Highlighting) -->
   <script src="/static/marked.min.js"></script>
@@ -20,12 +20,6 @@
        ========================================================================= -->
   <header>
     <div class="brand">
-      <button id="sidebarToggleBtn" class="btn-icon header-toggle" title="Toggle sidebar (Ctrl+B)">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
-          <line x1="9" x2="9" y1="3" y2="21"/>
-        </svg>
-      </button>
       <div class="brand-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
@@ -38,6 +32,30 @@
     </div>
 
     <div class="header-status">
+      <!-- Authentication / User Account Status -->
+      <div id="authHeaderContainer" class="auth-header-wrap">
+        <button id="headerLoginBtn" class="header-auth-btn" type="button" title="Sign in to save and access private chat history">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>
+          </svg>
+          <span>Sign In</span>
+        </button>
+        <div id="userProfileBadge" class="user-profile-badge" style="display: none;">
+          <span class="user-avatar-icon">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+          </span>
+          <span id="headerUsername" class="user-name-text">alex</span>
+          <button id="headerLogoutBtn" class="btn-logout" title="Sign out" type="button">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
       <button id="helpBtn" class="header-help-btn" type="button" title="Open Beginner's Guide & Architecture Walkthrough (PDF)">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="10"/>
@@ -46,21 +64,38 @@
         </svg>
         <span>Help & Guide</span>
       </button>
-      <div id="connectionStatus" class="status-pill">
-        <span class="status-dot degraded"></span>
-        <span id="connectionText">Checking Ollama…</span>
-      </div>
     </div>
   </header>
+
+  <!-- Mobile Drawer Backdrop Overlay -->
+  <div id="sidebarBackdrop" class="sidebar-backdrop" aria-hidden="true"></div>
 
   <!-- =========================================================================
        2. Main Layout (Sidebar + Chat Area)
        ========================================================================= -->
-  <main id="appMain">
+  <main id="appMain" class="sidebar-collapsed">
     <!-- Left Sidebar: Workspace, Segmented Tabs, Document Ingestion, System Health -->
-    <aside id="appSidebar">
+    <aside id="appSidebar" class="collapsed" aria-label="Application Sidebar" aria-hidden="true">
       <!-- Fixed Sidebar Header Controls -->
       <div class="sidebar-top">
+        <!-- Sidebar Navigation Header & Collapse Control -->
+        <div class="sidebar-nav-header">
+          <div class="sidebar-nav-title">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+              <line x1="9" x2="9" y1="3" y2="21"/>
+            </svg>
+            <span>Navigation</span>
+          </div>
+          <button id="sidebarCollapseBtn" class="btn-icon sidebar-collapse-btn" title="Collapse sidebar (Ctrl+B)" aria-label="Collapse sidebar" aria-expanded="false">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+              <line x1="9" x2="9" y1="3" y2="21"/>
+              <path d="m14 9-3 3 3 3"/>
+            </svg>
+          </button>
+        </div>
+
         <!-- Workspace Card -->
         <div class="workspace-card collapsed" id="workspaceCard">
           <div class="workspace-header" id="workspaceCardHeader" role="button" tabindex="0" title="Click to expand or collapse workspace" aria-expanded="false" aria-controls="workspaceCardBody">
@@ -148,16 +183,39 @@
       <div class="sidebar-scroll">
         <!-- TAB 1: CONVERSATIONS (CHAT HISTORY) -->
         <div id="tabContentChats" class="tab-pane active">
-          <!-- Quick search filter -->
-          <div class="filter-wrapper">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-            </svg>
-            <input type="text" id="chatSearchInput" placeholder="Filter conversations…">
+          <!-- Auth Locked Banner / State (shown when logged out) -->
+          <div id="chatAuthLockedState" class="chat-auth-locked" style="display: none;">
+            <div class="auth-lock-card">
+              <div class="auth-lock-icon-wrap">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+              </div>
+              <h4>Chat History Locked</h4>
+              <p>Sign in to view, search, and manage your private chat history threads.</p>
+              <button id="chatsUnlockBtn" class="btn-primary btn-sm" type="button">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>
+                </svg>
+                <span>Sign In / Register</span>
+              </button>
+            </div>
           </div>
 
-          <div id="conversationList" class="conversation-list">
-            <p class="file-size" style="padding: 10px 0;">Loading conversations…</p>
+          <!-- Unlocked conversation content (shown when logged in) -->
+          <div id="chatUnlockedView" class="chat-unlocked-view">
+            <!-- Quick search filter -->
+            <div class="filter-wrapper">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+              </svg>
+              <input type="text" id="chatSearchInput" placeholder="Filter conversations…">
+            </div>
+
+            <div id="conversationList" class="conversation-list">
+              <p class="file-size" style="padding: 10px 0;">Loading conversations…</p>
+            </div>
           </div>
         </div>
 
@@ -213,6 +271,16 @@
 
     <!-- Right Chat Panel -->
     <section class="chat-section">
+      <!-- Pinned/Floating Expand Sidebar Button (Visible when sidebar is collapsed) -->
+      <button id="sidebarExpandBtn" class="sidebar-expand-tab" title="Expand sidebar (Ctrl+B)" aria-label="Expand sidebar" aria-expanded="false">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+          <line x1="9" x2="9" y1="3" y2="21"/>
+          <path d="m13 9 3 3-3 3"/>
+        </svg>
+        <span class="expand-label">Expand</span>
+      </button>
+
       <!-- Conversation History & Messages Container -->
       <div id="messagesContainer" class="messages-container">
         <!-- Default Welcome Hero -->
@@ -345,6 +413,84 @@
     </div>
   </dialog>
 
+  <!-- Modal Dialog: Account Sign In / Register -->
+  <dialog id="authDialog" class="modal-dialog">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+          </div>
+          <h3 id="authModalTitle">Sign In</h3>
+        </div>
+        <button id="closeAuthDialogBtn" class="btn-icon" type="button" title="Close (Esc)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Tab Switcher inside Auth Modal: Sign In vs Create Account -->
+      <div class="auth-mode-tabs">
+        <button type="button" id="authModeLoginBtn" class="auth-mode-tab active">Sign In</button>
+        <button type="button" id="authModeRegisterBtn" class="auth-mode-tab">Create Account</button>
+      </div>
+
+      <form id="authForm">
+        <p id="authModalDesc" class="modal-desc">
+          Sign in to access, search, and manage your private chat history threads.
+        </p>
+
+        <div id="authErrorMessage" class="auth-error-alert" style="display: none;"></div>
+
+        <div class="form-group">
+          <label for="authUsernameInput">Username</label>
+          <input 
+            type="text" 
+            id="authUsernameInput" 
+            placeholder="e.g. alex" 
+            required 
+            maxlength="30"
+            autocomplete="username"
+            spellcheck="false"
+          >
+          <span class="field-hint" id="authUsernameHint" style="display: none;">3-30 letters, numbers, or dashes.</span>
+        </div>
+
+        <div class="form-group" style="margin-top: 10px;">
+          <label for="authPasswordInput">Password</label>
+          <input 
+            type="password" 
+            id="authPasswordInput" 
+            placeholder="Enter password" 
+            required 
+            maxlength="128"
+            autocomplete="current-password"
+          >
+          <span id="authPasswordHint" class="field-hint" style="display: none;">Minimum 4 characters.</span>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="cancelAuthDialogBtn" class="btn-secondary">Cancel</button>
+          <button type="submit" id="submitAuthDialogBtn" class="btn-primary">
+            <span id="authSubmitText">Sign In</span>
+          </button>
+        </div>
+
+        <div class="auth-security-notice">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+          <span>Offline & Zero Cloud: Passwords are hashed with bcrypt locally on this machine.</span>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
   <!-- Modal Dialog: Help & Beginner's Guide PDF Popup -->
   <dialog id="helpDialog" class="modal-dialog modal-pdf-dialog">
     <div class="modal-card modal-pdf-card">
@@ -386,6 +532,6 @@
   </dialog>
 
   <!-- Application Logic -->
-  <script src="/static/app.js?v=2.0.1"></script>
+  <script src="/static/app.js?v=2.1.0"></script>
 </body>
 </html>

@@ -31,6 +31,91 @@ if (window.marked) {
 let activeAbortController = null;
 
 // ==============================================================================
+// 0. User Authentication & Chat History Security State
+// ==============================================================================
+
+let currentUser = null; // { id: number, username: string } or null
+let authMode = "login"; // "login" | "register"
+
+function getAuthToken() {
+  return localStorage.getItem("coworker_auth_token") || "";
+}
+
+function setAuthToken(token) {
+  if (token) {
+    localStorage.setItem("coworker_auth_token", token);
+  } else {
+    localStorage.removeItem("coworker_auth_token");
+  }
+}
+
+/**
+ * Custom fetch wrapper that automatically appends the Bearer authentication token
+ * if a user session is active.
+ */
+async function authFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  const token = getAuthToken();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  options.headers = headers;
+  return fetch(url, options);
+}
+
+function updateAuthUI() {
+  const loginBtn = $("headerLoginBtn");
+  const profileBadge = $("userProfileBadge");
+  const usernameSpan = $("headerUsername");
+
+  if (currentUser) {
+    if (loginBtn) loginBtn.style.display = "none";
+    if (profileBadge) profileBadge.style.display = "inline-flex";
+    if (usernameSpan) usernameSpan.textContent = currentUser.username;
+    showChatUnlockedState();
+  } else {
+    if (loginBtn) loginBtn.style.display = "inline-flex";
+    if (profileBadge) profileBadge.style.display = "none";
+    showChatLockedState();
+  }
+}
+
+function showChatLockedState() {
+  const lockedState = $("chatAuthLockedState");
+  const unlockedView = $("chatUnlockedView");
+  const tabBadge = $("tabChatCount");
+
+  if (lockedState) lockedState.style.display = "flex";
+  if (unlockedView) unlockedView.style.display = "none";
+  if (tabBadge) tabBadge.textContent = "🔒";
+}
+
+function showChatUnlockedState() {
+  const lockedState = $("chatAuthLockedState");
+  const unlockedView = $("chatUnlockedView");
+
+  if (lockedState) lockedState.style.display = "none";
+  if (unlockedView) unlockedView.style.display = "block";
+}
+
+async function checkAuthStatus() {
+  try {
+    const res = await authFetch("/api/auth/me");
+    if (!res.ok) throw new Error("Auth check failed");
+    const data = await res.json();
+    if (data.authenticated) {
+      currentUser = { id: data.user_id, username: data.username };
+    } else {
+      currentUser = null;
+    }
+  } catch (err) {
+    currentUser = null;
+  }
+  updateAuthUI();
+  return currentUser;
+}
+
+// ==============================================================================
 // 1. Session & Workspace Helpers
 // ==============================================================================
 
@@ -159,6 +244,10 @@ function getConversationId() {
 function setConversationId(id) {
   const key = "coworkerConversationId:" + getWorkspace();
   sessionStorage.setItem(key, id);
+  if (window.innerWidth <= 860) {
+    $("appSidebar")?.classList.remove("mobile-open");
+    $("sidebarBackdrop")?.classList.remove("active");
+  }
 }
 
 /**
@@ -506,14 +595,27 @@ $("uploadBtn").addEventListener("click", async () => {
 
 /**
  * Loads and displays all saved conversation threads for the current workspace.
+ * Requires user authentication; shows privacy locked state when unauthenticated.
  */
 async function loadConversations() {
   const list = $("conversationList");
   if (!list) return;
 
+  if (!currentUser) {
+    showChatLockedState();
+    return;
+  }
+  showChatUnlockedState();
+
   try {
     const workspace = encodeURIComponent(getWorkspace());
-    const res = await fetch(`/api/chat/conversations?workspace=${workspace}`);
+    const res = await authFetch(`/api/chat/conversations?workspace=${workspace}`);
+    if (res.status === 401) {
+      currentUser = null;
+      setAuthToken(null);
+      updateAuthUI();
+      return;
+    }
     const data = await res.json();
     const conversations = data.conversations || [];
     const activeId = getConversationId();
@@ -568,7 +670,7 @@ async function loadConversations() {
         e.stopPropagation();
         if (!confirm(`Delete conversation "${conv.title}"?`)) return;
         try {
-          const delRes = await fetch("/api/chat/conversations", {
+          const delRes = await authFetch("/api/chat/conversations", {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -738,7 +840,7 @@ async function sendQuestion(customMessage = null) {
   let retrievedChunks = 0;
 
   try {
-    const response = await fetch("/api/chat", {
+    const response = await authFetch("/api/chat", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
@@ -960,10 +1062,22 @@ async function sendQuestion(customMessage = null) {
 // ==============================================================================
 
 async function loadChatHistory(explicitConvId = null) {
+  if (!currentUser) {
+    // When not logged in, chat history is locked; show welcome hero
+    const container = $("messagesContainer");
+    if (container && !container.querySelector(".msg-row")) {
+      renderWelcomeHero(container);
+    }
+    return;
+  }
+
   try {
     const workspace = encodeURIComponent(getWorkspace());
     const convId = encodeURIComponent(explicitConvId || getConversationId());
-    const response = await fetch(`/api/chat/history?workspace=${workspace}&conversation_id=${convId}`);
+    const response = await authFetch(`/api/chat/history?workspace=${workspace}&conversation_id=${convId}`);
+    if (response.status === 401) {
+      return;
+    }
     const data = await response.json();
     const messages = data.messages || [];
 
@@ -1014,36 +1128,41 @@ async function loadChatHistory(explicitConvId = null) {
       scrollToBottom();
     } else {
       // Empty conversation - display initial welcome hero
-      container.innerHTML = `
-        <div id="welcomeHero" class="welcome-hero">
-          <div class="welcome-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-            </svg>
-          </div>
-          <h2>How can I help you today?</h2>
-          <p>I can analyze, summarize, and cross-reference documents stored in this workspace with accurate source citations.</p>
-
-          <div class="starter-chips">
-            <button class="chip" data-prompt="Summarize the key objectives and conclusions from the uploaded documents.">
-              📑 Summarize key objectives
-            </button>
-            <button class="chip" data-prompt="Extract all dates, milestones, and project deadlines.">
-              🗓️ Find deadlines & milestones
-            </button>
-            <button class="chip" data-prompt="Who are the key people mentioned and what are their designated roles?">
-              👤 Identify team & roles
-            </button>
-            <button class="chip" data-prompt="List all financial numbers, budgets, and cost metrics mentioned.">
-              💰 Extract budget & financials
-            </button>
-          </div>
-        </div>
-      `;
+      renderWelcomeHero(container);
     }
   } catch (err) {
     console.warn("Could not load history:", err);
   }
+}
+
+function renderWelcomeHero(container) {
+  if (!container) return;
+  container.innerHTML = `
+    <div id="welcomeHero" class="welcome-hero">
+      <div class="welcome-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+        </svg>
+      </div>
+      <h2>How can I help you today?</h2>
+      <p>I can analyze, summarize, and cross-reference documents stored in this workspace with accurate source citations.</p>
+
+      <div class="starter-chips">
+        <button class="chip" data-prompt="Summarize the key objectives and conclusions from the uploaded documents.">
+          📑 Summarize key objectives
+        </button>
+        <button class="chip" data-prompt="Extract all dates, milestones, and project deadlines.">
+          🗓️ Find deadlines & milestones
+        </button>
+        <button class="chip" data-prompt="Who are the key people mentioned and what are their designated roles?">
+          👤 Identify team & roles
+        </button>
+        <button class="chip" data-prompt="List all financial numbers, budgets, and cost metrics mentioned.">
+          💰 Extract budget & financials
+        </button>
+      </div>
+    </div>
+  `;
 }
 
 // ==============================================================================
@@ -1279,7 +1398,7 @@ $("clearChatBtn").addEventListener("click", async () => {
   if (!confirm("Clear memory for this current conversation?")) return;
 
   try {
-    await fetch("/api/chat/reset", {
+    await authFetch("/api/chat/reset", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({ workspace: getWorkspace(), conversation_id: convId })
@@ -1297,6 +1416,13 @@ function switchSidebarTab(tabName) {
   if ($("tabFilesBtn")) $("tabFilesBtn").classList.toggle("active", !isChats);
   if ($("tabContentChats")) $("tabContentChats").classList.toggle("active", isChats);
   if ($("tabContentFiles")) $("tabContentFiles").classList.toggle("active", !isChats);
+  if (isChats) {
+    if (!currentUser) {
+      showChatLockedState();
+    } else {
+      showChatUnlockedState();
+    }
+  }
   localStorage.setItem("coworker_sidebar_tab", tabName);
 }
 
@@ -1360,22 +1486,98 @@ if (workspaceCardHeader) {
 }
 
 // Sidebar Collapse / Expand Toggle
-function toggleSidebar() {
+function updateSidebarUI(isCollapsed) {
   const mainEl = $("appMain");
-  if (!mainEl) return;
-  const isCollapsed = mainEl.classList.toggle("sidebar-collapsed");
-  localStorage.setItem("coworker_sidebar_collapsed", isCollapsed ? "1" : "0");
+  const sidebarEl = $("appSidebar");
+  const collapseBtn = $("sidebarCollapseBtn");
+  const expandBtn = $("sidebarExpandBtn");
+  const backdrop = $("sidebarBackdrop");
+
+  if (mainEl) {
+    mainEl.classList.toggle("sidebar-collapsed", isCollapsed);
+  }
+  if (sidebarEl) {
+    sidebarEl.classList.toggle("collapsed", isCollapsed);
+    sidebarEl.setAttribute("aria-hidden", isCollapsed ? "true" : "false");
+    if (isCollapsed) {
+      sidebarEl.classList.remove("mobile-open");
+      if (backdrop) backdrop.classList.remove("active");
+    }
+  }
+
+  if (collapseBtn) {
+    collapseBtn.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+  }
+  if (expandBtn) {
+    expandBtn.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+  }
 }
 
-if ($("sidebarToggleBtn")) {
-  $("sidebarToggleBtn").addEventListener("click", toggleSidebar);
+function toggleSidebar(forceState) {
+  const mainEl = $("appMain");
+  const sidebarEl = $("appSidebar");
+  if (!mainEl && !sidebarEl) return;
+
+  const isMobile = window.innerWidth <= 860;
+  if (isMobile) {
+    const backdrop = $("sidebarBackdrop");
+    const isOpen = sidebarEl ? sidebarEl.classList.contains("mobile-open") : false;
+    const shouldOpen = typeof forceState === "boolean" ? !forceState : !isOpen;
+    if (sidebarEl) sidebarEl.classList.toggle("mobile-open", shouldOpen);
+    if (backdrop) backdrop.classList.toggle("active", shouldOpen);
+    return;
+  }
+
+  const currentlyCollapsed = mainEl ? mainEl.classList.contains("sidebar-collapsed") : false;
+  const nextCollapsed = typeof forceState === "boolean" ? forceState : !currentlyCollapsed;
+  updateSidebarUI(nextCollapsed);
+  localStorage.setItem("coworker_sidebar_collapsed", nextCollapsed ? "1" : "0");
 }
 
-// Keyboard Shortcut: Ctrl+B or Cmd+B to toggle sidebar
+if ($("sidebarCollapseBtn")) {
+  $("sidebarCollapseBtn").addEventListener("click", () => {
+    if (window.innerWidth <= 860) {
+      $("appSidebar")?.classList.remove("mobile-open");
+      $("sidebarBackdrop")?.classList.remove("active");
+    } else {
+      toggleSidebar(true);
+    }
+  });
+}
+
+if ($("sidebarExpandBtn")) {
+  $("sidebarExpandBtn").addEventListener("click", () => toggleSidebar(false));
+}
+
+if ($("sidebarBackdrop")) {
+  $("sidebarBackdrop").addEventListener("click", () => {
+    $("appSidebar")?.classList.remove("mobile-open");
+    $("sidebarBackdrop")?.classList.remove("active");
+  });
+}
+
+// Keyboard Shortcut: Ctrl+B or Cmd+B to toggle sidebar, Esc to close mobile drawer
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
     e.preventDefault();
     toggleSidebar();
+  } else if (e.key === "Escape") {
+    const sidebarEl = $("appSidebar");
+    const backdrop = $("sidebarBackdrop");
+    if (sidebarEl && sidebarEl.classList.contains("mobile-open")) {
+      sidebarEl.classList.remove("mobile-open");
+      if (backdrop) backdrop.classList.remove("active");
+    }
+  }
+});
+
+// Clean up mobile drawer when resizing back to desktop
+window.addEventListener("resize", () => {
+  if (window.innerWidth > 860) {
+    const sidebarEl = $("appSidebar");
+    const backdrop = $("sidebarBackdrop");
+    if (sidebarEl) sidebarEl.classList.remove("mobile-open");
+    if (backdrop) backdrop.classList.remove("active");
   }
 });
 
@@ -1383,8 +1585,165 @@ document.addEventListener("keydown", (e) => {
 const savedTab = localStorage.getItem("coworker_sidebar_tab") || "chats";
 switchSidebarTab(savedTab);
 
-if (localStorage.getItem("coworker_sidebar_collapsed") === "1") {
-  $("appMain")?.classList.add("sidebar-collapsed");
+// Default to collapsed unless explicitly expanded by user ("0")
+const savedCollapsed = localStorage.getItem("coworker_sidebar_collapsed");
+const shouldBeCollapsed = savedCollapsed !== "0";
+if (window.innerWidth > 860) {
+  updateSidebarUI(shouldBeCollapsed);
+} else {
+  updateSidebarUI(false);
+}
+
+// ==============================================================================
+// 9. Auth Dialog & Session Interaction Handlers
+// ==============================================================================
+
+const authDialog = $("authDialog");
+const authForm = $("authForm");
+const authUsernameInput = $("authUsernameInput");
+const authPasswordInput = $("authPasswordInput");
+const authErrorMessage = $("authErrorMessage");
+const authSubmitBtn = $("submitAuthDialogBtn");
+const authSubmitText = $("authSubmitText");
+const authModeLoginBtn = $("authModeLoginBtn");
+const authModeRegisterBtn = $("authModeRegisterBtn");
+
+function setAuthMode(mode) {
+  authMode = mode;
+  if (authErrorMessage) {
+    authErrorMessage.style.display = "none";
+    authErrorMessage.textContent = "";
+  }
+  if (mode === "register") {
+    if (authModeLoginBtn) authModeLoginBtn.classList.remove("active");
+    if (authModeRegisterBtn) authModeRegisterBtn.classList.add("active");
+    if ($("authModalTitle")) $("authModalTitle").textContent = "Create Account";
+    if ($("authModalDesc")) $("authModalDesc").textContent = "Create a local account to save, search, and secure your conversation history.";
+    if (authSubmitText) authSubmitText.textContent = "Create Account";
+    if ($("authUsernameHint")) $("authUsernameHint").style.display = "block";
+    if ($("authPasswordHint")) $("authPasswordHint").style.display = "block";
+  } else {
+    if (authModeLoginBtn) authModeLoginBtn.classList.add("active");
+    if (authModeRegisterBtn) authModeRegisterBtn.classList.remove("active");
+    if ($("authModalTitle")) $("authModalTitle").textContent = "Sign In";
+    if ($("authModalDesc")) $("authModalDesc").textContent = "Sign in to access, search, and manage your private chat history threads.";
+    if (authSubmitText) authSubmitText.textContent = "Sign In";
+    if ($("authUsernameHint")) $("authUsernameHint").style.display = "none";
+    if ($("authPasswordHint")) $("authPasswordHint").style.display = "none";
+  }
+}
+
+function openAuthModal(defaultMode = "login") {
+  if (!authDialog) return;
+  setAuthMode(defaultMode);
+  if (authUsernameInput) authUsernameInput.value = "";
+  if (authPasswordInput) authPasswordInput.value = "";
+  if (authErrorMessage) {
+    authErrorMessage.style.display = "none";
+    authErrorMessage.textContent = "";
+  }
+  authDialog.showModal();
+  setTimeout(() => {
+    if (authUsernameInput) authUsernameInput.focus();
+  }, 100);
+}
+
+function closeAuthModal() {
+  if (authDialog) authDialog.close();
+}
+
+if ($("headerLoginBtn")) {
+  $("headerLoginBtn").addEventListener("click", () => openAuthModal("login"));
+}
+
+if ($("chatsUnlockBtn")) {
+  $("chatsUnlockBtn").addEventListener("click", () => openAuthModal("login"));
+}
+
+if ($("closeAuthDialogBtn")) {
+  $("closeAuthDialogBtn").addEventListener("click", closeAuthModal);
+}
+
+if ($("cancelAuthDialogBtn")) {
+  $("cancelAuthDialogBtn").addEventListener("click", closeAuthModal);
+}
+
+if (authDialog) {
+  authDialog.addEventListener("click", (e) => {
+    if (e.target === authDialog) closeAuthModal();
+  });
+}
+
+if (authModeLoginBtn) {
+  authModeLoginBtn.addEventListener("click", () => setAuthMode("login"));
+}
+
+if (authModeRegisterBtn) {
+  authModeRegisterBtn.addEventListener("click", () => setAuthMode("register"));
+}
+
+if (authForm) {
+  authForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const username = (authUsernameInput?.value || "").trim();
+    const password = authPasswordInput?.value || "";
+
+    if (!username || !password) return;
+
+    if (authErrorMessage) {
+      authErrorMessage.style.display = "none";
+      authErrorMessage.textContent = "";
+    }
+    if (authSubmitBtn) authSubmitBtn.disabled = true;
+
+    try {
+      const endpoint = authMode === "register" ? "/api/auth/register" : "/api/auth/login";
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Authentication failed");
+      }
+
+      setAuthToken(data.token);
+      currentUser = { id: data.user_id, username: data.username };
+      updateAuthUI();
+      closeAuthModal();
+
+      $("chatStatusText").textContent = `Signed in as ${data.username}.`;
+      await Promise.all([
+        loadConversations(),
+        loadChatHistory(),
+      ]);
+    } catch (err) {
+      if (authErrorMessage) {
+        authErrorMessage.textContent = err.message;
+        authErrorMessage.style.display = "block";
+      }
+    } finally {
+      if (authSubmitBtn) authSubmitBtn.disabled = false;
+    }
+  });
+}
+
+async function handleLogout() {
+  try {
+    await authFetch("/api/auth/logout", { method: "POST" });
+  } catch (err) {
+    console.warn("Logout error:", err);
+  }
+  setAuthToken(null);
+  currentUser = null;
+  updateAuthUI();
+  startNewConversation();
+  $("chatStatusText").textContent = "Signed out. Chat history locked.";
+}
+
+if ($("headerLogoutBtn")) {
+  $("headerLogoutBtn").addEventListener("click", handleLogout);
 }
 
 // Delegate click on prompt starter chips
@@ -1397,11 +1756,12 @@ document.addEventListener("click", (e) => {
 
 // Initial page startup
 (async function init() {
+  await checkAuthStatus();
   await loadWorkspaces();
   await Promise.all([
     loadFiles(),
     loadHealth(),
-    loadConversations(),
-    loadChatHistory(),
+    currentUser ? loadConversations() : Promise.resolve(),
+    currentUser ? loadChatHistory() : Promise.resolve(),
   ]);
 })();

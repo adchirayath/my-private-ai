@@ -1,9 +1,11 @@
 import json
+from typing import Optional
 from pydantic import BaseModel
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from core.auth import get_current_user, get_optional_current_user
 from core.config import normalize_workspace
 from core.db import (
     get_conversation_history,
@@ -34,10 +36,13 @@ class ConversationResetRequest(BaseModel):
 
 
 @router.post("")
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    current_user: Optional[dict] = Depends(get_optional_current_user),
+):
     """
     Search documents using Phase 3 Hybrid Retrieval (BM25 + ChromaDB + RRF)
-    and answer using persistent SQLite conversation history.
+    and answer using persistent SQLite conversation history scoped to the user.
     Supports real-time token streaming via Server-Sent Events (SSE).
     """
     question = request.message.strip()
@@ -62,9 +67,10 @@ async def chat(request: ChatRequest):
 
     workspace = normalize_workspace(request.workspace)
     conversation_id = request.conversation_id.strip() or "default"
+    user_id = current_user["id"] if current_user else None
 
-    # Phase 2: Persistent SQLite History
-    history = get_conversation_history(workspace, conversation_id)
+    # Persistent SQLite History scoped to authenticated user
+    history = get_conversation_history(workspace, conversation_id, user_id=user_id)
 
     if is_greeting_or_smalltalk(question):
         search_query = question
@@ -97,6 +103,8 @@ async def chat(request: ChatRequest):
                 "sources": sources,
                 "retrieved_chunks": len(matches),
                 "search_query": search_query,
+                "authenticated": bool(current_user),
+                "user": current_user["username"] if current_user else None,
             }
             yield f"event: meta\ndata: {json.dumps(meta_payload)}\n\n"
 
@@ -120,10 +128,10 @@ async def chat(request: ChatRequest):
 
             full_answer = "".join(accumulated_tokens).strip()
 
-            # 3. Phase 2: Save to persistent SQLite database
+            # 3. Phase 2: Save to persistent SQLite database (scoped to user)
             if full_answer:
-                save_message(workspace, conversation_id, "user", question)
-                save_message(workspace, conversation_id, "assistant", full_answer, sources)
+                save_message(workspace, conversation_id, "user", question, user_id=user_id)
+                save_message(workspace, conversation_id, "assistant", full_answer, sources, user_id=user_id)
 
             # 4. Final done event
             yield f"event: done\ndata: {json.dumps({'answer': full_answer})}\n\n"
@@ -152,8 +160,8 @@ async def chat(request: ChatRequest):
             detail=str(exc),
         ) from exc
 
-    save_message(workspace, conversation_id, "user", question)
-    save_message(workspace, conversation_id, "assistant", answer, sources)
+    save_message(workspace, conversation_id, "user", question, user_id=user_id)
+    save_message(workspace, conversation_id, "assistant", answer, sources, user_id=user_id)
 
     return {
         "workspace": workspace,
@@ -162,12 +170,16 @@ async def chat(request: ChatRequest):
         "sources": sources,
         "retrieved_chunks": len(matches),
         "search_query": search_query,
+        "authenticated": bool(current_user),
     }
 
 
 @router.post("/reset")
-def reset_conversation(request: ConversationResetRequest):
-    """Clear persistent SQLite history for one conversation."""
+def reset_conversation(
+    request: ConversationResetRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Clear persistent SQLite history for one conversation (requires login)."""
     workspace = normalize_workspace(request.workspace)
     conversation_id = request.conversation_id.strip() or "default"
 
@@ -177,46 +189,66 @@ def reset_conversation(request: ConversationResetRequest):
             detail="The conversation ID is too long.",
         )
 
-    clear_conversation_history(workspace, conversation_id)
+    clear_conversation_history(workspace, conversation_id, user_id=current_user["id"])
     return {"status": "reset", "workspace": workspace}
 
 
 @router.get("/history")
-def fetch_history(workspace: str = "default", conversation_id: str = "default"):
+def fetch_history(
+    workspace: str = "default",
+    conversation_id: str = "default",
+    current_user: dict = Depends(get_current_user),
+):
     """
     Retrieve stored chat history from SQLite for workspace restoration on page refresh.
+    Requires authentication to protect private user chat history.
     """
     workspace = normalize_workspace(workspace)
     conversation_id = conversation_id.strip() or "default"
-    messages = get_conversation_history(workspace, conversation_id, limit=50)
+    messages = get_conversation_history(
+        workspace,
+        conversation_id,
+        limit=50,
+        user_id=current_user["id"],
+    )
     return {
         "workspace": workspace,
         "conversation_id": conversation_id,
         "messages": messages,
+        "user": current_user["username"],
     }
 
 
 @router.get("/conversations")
-def fetch_conversations(workspace: str = "default"):
+def fetch_conversations(
+    workspace: str = "default",
+    current_user: dict = Depends(get_current_user),
+):
     """
-    List all saved conversation threads for a workspace.
+    List all saved conversation threads for a workspace belonging to current user.
+    Requires authentication to protect private chat threads.
     """
     workspace = normalize_workspace(workspace)
-    conversations = list_conversations(workspace)
+    conversations = list_conversations(workspace, user_id=current_user["id"])
     return {
         "workspace": workspace,
         "conversations": conversations,
+        "user": current_user["username"],
     }
 
 
 @router.delete("/conversations")
-def delete_conversation(request: ConversationResetRequest):
+def delete_conversation(
+    request: ConversationResetRequest,
+    current_user: dict = Depends(get_current_user),
+):
     """
     Delete a specific conversation thread and its message history from SQLite.
+    Requires authentication to ensure users only delete their own conversations.
     """
     workspace = normalize_workspace(request.workspace)
     conversation_id = request.conversation_id.strip() or "default"
-    clear_conversation_history(workspace, conversation_id)
+    clear_conversation_history(workspace, conversation_id, user_id=current_user["id"])
     return {
         "status": "deleted",
         "workspace": workspace,
