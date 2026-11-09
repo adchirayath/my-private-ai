@@ -12,6 +12,7 @@ from core.db import (
     save_message,
     clear_conversation_history,
     list_conversations,
+    create_workspace_db,
 )
 from services.ollama import (
     ask_ollama,
@@ -19,7 +20,7 @@ from services.ollama import (
     stream_ollama,
 )
 from services.rag import search_documents_hybrid, is_greeting_or_smalltalk
-from services.starter_prompts import get_starter_prompts
+from services.starter_prompts import get_starter_prompts, GENERIC_STARTER_CHIPS
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -72,6 +73,9 @@ async def chat(
     workspace = normalize_workspace(request.workspace)
     conversation_id = request.conversation_id.strip() or "default"
     user_id = current_user["id"] if current_user else None
+
+    if workspace != "default":
+        create_workspace_db(workspace, user_id=user_id)
 
     # Persistent SQLite History scoped to authenticated user
     history = get_conversation_history(workspace, conversation_id, user_id=user_id)
@@ -348,11 +352,21 @@ def fetch_starter_prompts(
     """
     Return generic starter prompt chips if no documents are attached to the workspace,
     or dynamic document-specific prompt questions if documents are attached.
+    If the user is not authenticated, returns generic starter prompts to prevent
+    exposing document counts or suggestions from other users.
     """
-    user_id = current_user["id"] if current_user else None
+    clean_workspace = normalize_workspace(workspace)
+    if not current_user:
+        return {
+            "workspace": clean_workspace,
+            "has_documents": False,
+            "document_count": 0,
+            "chips": GENERIC_STARTER_CHIPS,
+            "description": "Ask a question, write code, brainstorm ideas, or attach documents to analyze them with citations.",
+        }
     return get_starter_prompts(
-        workspace=workspace,
-        user_id=user_id,
+        workspace=clean_workspace,
+        user_id=current_user["id"],
         background_tasks=background_tasks,
     )
 

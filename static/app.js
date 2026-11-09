@@ -510,11 +510,13 @@ function updateAuthUI() {
   const loginBtn = $("headerLoginBtn");
   const profileBadge = $("userProfileBadge");
   const usernameSpan = $("headerUsername");
+  const workspaceCard = $("workspaceCard");
 
   if (currentUser) {
     if (loginBtn) loginBtn.style.display = "none";
     if (profileBadge) profileBadge.style.display = "inline-flex";
     if (usernameSpan) usernameSpan.textContent = currentUser.username;
+    if (workspaceCard) workspaceCard.style.display = "block";
     showChatUnlockedState();
     showFilesUnlockedState();
     const userDocsTitle = $("userDocsSectionTitle");
@@ -522,6 +524,7 @@ function updateAuthUI() {
   } else {
     if (loginBtn) loginBtn.style.display = "inline-flex";
     if (profileBadge) profileBadge.style.display = "none";
+    if (workspaceCard) workspaceCard.style.display = "none";
     showChatLockedState();
     showFilesLockedState();
     const userDocsTitle = $("userDocsSectionTitle");
@@ -598,6 +601,13 @@ async function checkAuthStatus() {
 let cachedWorkspaces = [];
 
 /**
+ * Returns the storage key for saving the active workspace, isolated per user.
+ */
+function getWorkspaceStorageKey() {
+  return currentUser ? `coworker_active_workspace_${currentUser.id}` : "coworker_active_workspace_anon";
+}
+
+/**
  * Returns the currently active workspace name.
  */
 function getWorkspace() {
@@ -619,7 +629,7 @@ function setWorkspace(name) {
   const ws = (name || "default").trim().toLowerCase();
   if ($("workspace")) $("workspace").value = ws;
   if ($("workspaceSelect")) $("workspaceSelect").value = ws;
-  localStorage.setItem("coworker_active_workspace", ws);
+  localStorage.setItem(getWorkspaceStorageKey(), ws);
   updateWorkspaceUI();
 }
 
@@ -654,6 +664,13 @@ function updateWorkspaceUI() {
  * Fetches all available workspaces from backend and populates the selector dropdown
  */
 async function loadWorkspaces(preferredWorkspace = null) {
+  const workspaceCard = $("workspaceCard");
+  if (!currentUser) {
+    if (workspaceCard) workspaceCard.style.display = "none";
+    if ($("workspace")) $("workspace").value = "default";
+    return;
+  }
+  if (workspaceCard) workspaceCard.style.display = "block";
   try {
     const res = await authFetch("/api/workspaces");
     if (!res.ok) throw new Error("Failed to load workspaces");
@@ -663,9 +680,9 @@ async function loadWorkspaces(preferredWorkspace = null) {
     const select = $("workspaceSelect");
     if (!select) return;
 
+    const storageKey = getWorkspaceStorageKey();
     const savedWs = preferredWorkspace 
-      || localStorage.getItem("coworker_active_workspace") 
-      || $("workspace")?.value 
+      || localStorage.getItem(storageKey) 
       || "default";
 
     select.innerHTML = "";
@@ -683,17 +700,21 @@ async function loadWorkspaces(preferredWorkspace = null) {
       select.appendChild(option);
     }
 
-    if (!matched && savedWs) {
-      const option = document.createElement("option");
-      option.value = savedWs;
-      option.textContent = `${savedWs} (0 files · 0 chats)`;
-      option.selected = true;
-      select.appendChild(option);
+    if (!matched) {
+      if (cachedWorkspaces.length > 0) {
+        select.value = cachedWorkspaces[0].name;
+      } else {
+        const option = document.createElement("option");
+        option.value = "default";
+        option.textContent = "default (0 files · 0 chats)";
+        option.selected = true;
+        select.appendChild(option);
+      }
     }
 
     const finalActive = select.value || "default";
     if ($("workspace")) $("workspace").value = finalActive;
-    localStorage.setItem("coworker_active_workspace", finalActive);
+    localStorage.setItem(storageKey, finalActive);
     updateWorkspaceUI();
   } catch (err) {
     console.warn("Could not load workspaces:", err);
@@ -701,12 +722,13 @@ async function loadWorkspaces(preferredWorkspace = null) {
 }
 
 /**
- * Generates or retrieves the active conversation ID for the current workspace.
+ * Generates or retrieves the active conversation ID for the current workspace and user.
  * Stored in sessionStorage so switching tabs retains the current conversation
  * within the same browser session.
  */
 function getConversationId() {
-  const key = "coworkerConversationId:" + getWorkspace();
+  const userPrefix = currentUser ? `${currentUser.id}:` : "";
+  const key = `coworkerConversationId:${userPrefix}${getWorkspace()}`;
   let id = sessionStorage.getItem(key);
   if (!id) {
     id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : "conv-" + Date.now();
@@ -1986,13 +2008,45 @@ function renderWelcomeHero(container, isNew = false) {
 }
 
 /**
+ * Renders generic baseline starter prompt chips.
+ */
+function renderGenericChips(container) {
+  if (!container) return;
+  const descEl = $("welcomeDescription");
+  if (descEl && (descEl.textContent.includes("attached document") || descEl.textContent.includes("click a suggestion"))) {
+    descEl.textContent = "Ask a question, write code, brainstorm ideas, or attach documents to analyze them with citations.";
+  }
+  container.innerHTML = `
+    <button class="chip" data-prompt="Brainstorm 5 innovative, practical ideas for a new software project.">
+      💡 Brainstorm ideas
+    </button>
+    <button class="chip" data-prompt="Write a clean Python script to automate everyday file processing and data cleanup.">
+      💻 Python automation
+    </button>
+    <button class="chip" data-prompt="Draft a concise, professional follow-up email after a project kickoff meeting.">
+      ✍️ Draft email
+    </button>
+    <button class="chip" data-prompt="Explain how large language models and vector embeddings work in simple terms.">
+      🧠 Explain a concept
+    </button>
+  `;
+}
+
+/**
  * Dynamically fetches and updates starter prompts:
+ * - If user is not authenticated: strictly renders generic assistant prompt chips.
  * - If NO documents are attached: ensures generic assistant prompt chips.
  * - If documents ARE attached: renders dynamic document-specific questions.
  */
 async function refreshStarterChips() {
   const chipsContainer = $("starterChipsContainer") || document.querySelector(".starter-chips");
   if (!chipsContainer) return;
+
+  // Anonymous / unauthenticated sessions must never display document-specific suggestions
+  if (!currentUser) {
+    renderGenericChips(chipsContainer);
+    return;
+  }
 
   const ws = getWorkspace();
   try {
@@ -2102,6 +2156,10 @@ const newWsInput = $("newWorkspaceInput");
 
 if ($("newWorkspaceBtn")) {
   $("newWorkspaceBtn").addEventListener("click", () => {
+    if (!currentUser) {
+      openAuthModal("login");
+      return;
+    }
     if (newWsDialog) {
       newWsInput.value = "";
       newWsDialog.showModal();
@@ -2128,7 +2186,7 @@ if (newWsForm) {
     try {
       if (submitBtn) submitBtn.disabled = true;
 
-      const res = await fetch("/api/workspaces", {
+      const res = await authFetch("/api/workspaces", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: rawName }),
@@ -2243,7 +2301,7 @@ if ($("deleteWorkspaceBtn")) {
 
     try {
       $("deleteWorkspaceBtn").disabled = true;
-      const res = await fetch("/api/workspaces", {
+      const res = await authFetch("/api/workspaces", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workspace: activeWs }),
@@ -2610,6 +2668,7 @@ if (authForm) {
         loadFiles(),
         loadConversations(),
         loadChatHistory(),
+        refreshStarterChips(),
       ]);
     } catch (err) {
       if (authErrorMessage) {
@@ -2631,7 +2690,8 @@ async function handleLogout() {
   setAuthToken(null);
   currentUser = null;
   updateAuthUI();
-  await loadWorkspaces();
+  setWorkspace("default");
+  await loadWorkspaces("default");
   await loadFiles();
   startNewConversation();
   $("chatStatusText").textContent = "Signed out. Chat and documents locked.";

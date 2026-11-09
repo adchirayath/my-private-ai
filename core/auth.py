@@ -121,6 +121,13 @@ def register_user(username: str, password: str) -> dict:
                 )
             except Exception:
                 pass
+            try:
+                conn.execute(
+                    "UPDATE workspaces SET user_id = ? WHERE user_id IS NULL",
+                    (user_id,),
+                )
+            except Exception:
+                pass
 
         conn.commit()
 

@@ -27,6 +27,10 @@ from core.db import (
     delete_document,
     list_documents_db,
     get_document,
+    create_workspace_db,
+    delete_workspace_db,
+    list_workspaces_db,
+    workspace_exists_db,
 )
 from services.extractors import extract_text
 from services.rag import index_document
@@ -48,63 +52,28 @@ class DeleteWorkspaceRequest(BaseModel):
 
 
 @router.get("/workspaces")
-def list_workspaces(current_user: Optional[dict] = Depends(get_optional_current_user)):
+def list_workspaces(current_user: dict = Depends(get_current_user)):
     """
     List all known workspaces with file counts, conversation counts,
-    and indexed chunk counts, scoped to the current user if authenticated.
+    and indexed chunk counts, scoped strictly to the authenticated user.
     """
-    names = {"default"}
-    user_id = current_user["id"] if current_user else None
+    user_id = current_user["id"]
+    names = set(list_workspaces_db(user_id=user_id))
+    names.add("default")
 
-    # 1. Inspect directories on disk
-    if UPLOAD_DIR.exists():
-        for p in UPLOAD_DIR.iterdir():
+    user_dir = UPLOAD_DIR / f"user_{user_id}"
+    if user_dir.exists():
+        for p in user_dir.iterdir():
             if p.is_dir() and not p.name.startswith("."):
                 names.add(p.name)
 
-    # 2. Inspect SQLite for any workspaces with chat history
-    conv_counts = {}
-    try:
-        conv_counts = get_workspace_conversation_counts(user_id=user_id)
-        names.update(conv_counts.keys())
-    except Exception:
-        pass
-
-    # 3. Inspect SQLite for documents & chunks
-    doc_counts = {}
-    chunk_counts = {}
-    try:
-        doc_counts = get_workspace_document_counts(user_id=user_id)
-        chunk_counts = get_workspace_chunk_counts(user_id=user_id)
-        names.update(doc_counts.keys())
-    except Exception:
-        pass
-
-    # Fallback: if unauthenticated and no sqlite documents yet, inspect ChromaDB
-    if user_id is None and not doc_counts:
-        try:
-            records = documents_collection.get(include=["metadatas"])
-            for meta in records.get("metadatas", []):
-                if meta and "workspace" in meta:
-                    ws = meta["workspace"]
-                    chunk_counts[ws] = chunk_counts.get(ws, 0) + 1
-                    names.add(ws)
-        except Exception:
-            pass
+    conv_counts = get_workspace_conversation_counts(user_id=user_id)
+    doc_counts = get_workspace_document_counts(user_id=user_id)
+    chunk_counts = get_workspace_chunk_counts(user_id=user_id)
 
     workspaces = []
     for ws in sorted(names, key=lambda x: (x != "default", x)):
-        if user_id is not None:
-            file_count = doc_counts.get(ws, 0)
-        else:
-            ws_dir = UPLOAD_DIR / ws
-            file_count = doc_counts.get(ws, 0)
-            if file_count == 0 and ws_dir.exists() and ws_dir.is_dir():
-                file_count = sum(
-                    1 for p in ws_dir.iterdir()
-                    if p.is_file() and "__" in p.name
-                )
-
+        file_count = doc_counts.get(ws, 0)
         workspaces.append({
             "name": ws,
             "file_count": file_count,
@@ -117,9 +86,12 @@ def list_workspaces(current_user: Optional[dict] = Depends(get_optional_current_
 
 
 @router.post("/workspaces")
-def create_workspace(request: CreateWorkspaceRequest):
+def create_workspace(
+    request: CreateWorkspaceRequest,
+    current_user: dict = Depends(get_current_user),
+):
     """
-    Create a new workspace directory for document and chat isolation.
+    Create a new workspace directory for document and chat isolation scoped to the current user.
     """
     raw_name = (request.name or "").strip()
     clean_name = normalize_workspace(raw_name)
@@ -130,23 +102,24 @@ def create_workspace(request: CreateWorkspaceRequest):
             detail="Invalid workspace name. Must contain alphanumeric characters and cannot be 'default'.",
         )
 
-    workspace_dir = get_workspace_dir(clean_name)
+    user_id = current_user["id"]
+    create_workspace_db(clean_name, user_id=user_id)
+    workspace_dir = get_workspace_dir(clean_name, user_id=user_id, create=True)
     return {
         "status": "created",
         "workspace": clean_name,
         "path": str(workspace_dir),
+        "user_id": user_id,
     }
 
 
 @router.delete("/workspaces")
 def delete_workspace(
     request: DeleteWorkspaceRequest,
-    current_user: Optional[dict] = Depends(get_optional_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """
-    Completely remove a non-default workspace.
-    If authenticated, purges the current user's documents and chat history in this workspace.
-    If unauthenticated (or no other user documents exist), cleans disk files.
+    Completely remove a non-default workspace scoped to the current user.
     """
     clean_name = normalize_workspace(request.workspace)
     if clean_name == "default":
@@ -155,52 +128,45 @@ def delete_workspace(
             detail="The 'default' workspace cannot be deleted.",
         )
 
-    user_id = current_user["id"] if current_user else None
+    user_id = current_user["id"]
 
-    if user_id is not None:
-        # 1. Remove user vector chunks from ChromaDB
-        try:
-            documents_collection.delete(
-                where={
-                    "$and": [
-                        {"workspace": clean_name},
-                        {"user_id": user_id},
-                    ]
-                }
-            )
-        except Exception:
-            pass
+    # Check if workspace exists for this user
+    ws_exists = workspace_exists_db(clean_name, user_id=user_id)
+    ws_dir = get_workspace_dir(clean_name, user_id=user_id, create=False)
+    if not ws_exists and not ws_dir.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Workspace '{clean_name}' not found.",
+        )
 
-        # 2. Remove user messages and documents from SQLite
-        try:
-            delete_workspace_messages(clean_name, user_id=user_id)
-        except Exception:
-            pass
+    # 1. Remove user vector chunks from ChromaDB for this workspace
+    try:
+        documents_collection.delete(
+            where={
+                "$and": [
+                    {"workspace": clean_name},
+                    {"user_id": user_id},
+                ]
+            }
+        )
+    except Exception:
+        pass
 
-        # 3. Clean files from disk if no remaining user documents
-        remaining_docs = list_documents_db(clean_name)
-        deleted_from_disk = False
-        workspace_dir = UPLOAD_DIR / clean_name
-        if not remaining_docs and workspace_dir.exists():
-            shutil.rmtree(workspace_dir, ignore_errors=True)
-            deleted_from_disk = True
-    else:
-        # Unauthenticated fallback
-        try:
-            documents_collection.delete(where={"workspace": clean_name})
-        except Exception:
-            pass
+    # 2. Remove user messages and documents from SQLite
+    try:
+        delete_workspace_messages(clean_name, user_id=user_id)
+    except Exception:
+        pass
 
-        try:
-            delete_workspace_messages(clean_name)
-        except Exception:
-            pass
+    # 3. Remove workspace record from SQLite workspaces table
+    delete_workspace_db(clean_name, user_id=user_id)
 
-        workspace_dir = UPLOAD_DIR / clean_name
-        deleted_from_disk = False
-        if workspace_dir.exists():
-            shutil.rmtree(workspace_dir, ignore_errors=True)
-            deleted_from_disk = True
+    # 4. Clean user workspace directory on disk
+    workspace_dir = get_workspace_dir(clean_name, user_id=user_id)
+    deleted_from_disk = False
+    if workspace_dir.exists():
+        shutil.rmtree(workspace_dir, ignore_errors=True)
+        deleted_from_disk = True
 
     return {
         "status": "deleted",
@@ -220,8 +186,11 @@ async def upload_files(
     and persist vectors into ChromaDB scoped to the authenticated user.
     """
     workspace = normalize_workspace(workspace)
-    workspace_dir = get_workspace_dir(workspace)
     user_id = current_user["id"]
+    # Target user workspace directory
+    workspace_dir = get_workspace_dir(workspace, user_id=user_id, create=True)
+    if workspace != "default":
+        create_workspace_db(workspace, user_id=user_id)
 
     if len(files) > 50:
         raise HTTPException(
@@ -370,13 +339,16 @@ def delete_file(
         )
 
     workspace = normalize_workspace(request.workspace)
-    workspace_dir = get_workspace_dir(workspace)
     user_id = current_user["id"]
-
     # Verify ownership
+    # Locate file in user workspace directory
+    workspace_dir = get_workspace_dir(workspace, user_id=user_id, create=False)
     doc = get_document(request.file_id, workspace)
     if not doc:
         matches = list(workspace_dir.glob(f"{request.file_id}__*"))
+        if not matches:
+            legacy_dir = UPLOAD_DIR / workspace
+            matches = list(legacy_dir.glob(f"{request.file_id}__*"))
         if not matches:
             raise HTTPException(status_code=404, detail="File not found.")
 
@@ -410,6 +382,11 @@ def delete_file(
     for path in workspace_dir.glob(f"{request.file_id}__*"):
         path.unlink(missing_ok=True)
         deleted_on_disk = True
+    legacy_dir = UPLOAD_DIR / workspace
+    if not deleted_on_disk and legacy_dir.exists():
+        for path in legacy_dir.glob(f"{request.file_id}__*"):
+            path.unlink(missing_ok=True)
+            deleted_on_disk = True
 
     return {
         "status": "deleted",
@@ -442,9 +419,9 @@ def preview_file(
         )
 
     workspace = normalize_workspace(workspace)
-    workspace_dir = get_workspace_dir(workspace)
     user_id = current_user["id"]
-
+    # Locate file in user workspace directory
+    workspace_dir = get_workspace_dir(workspace, user_id=user_id, create=False)
     doc_info = get_document(file_id, workspace)
     if doc_info and doc_info.get("user_id") is not None and doc_info["user_id"] != user_id:
         raise HTTPException(
@@ -453,6 +430,9 @@ def preview_file(
         )
 
     matches = list(workspace_dir.glob(f"{file_id}__*"))
+    if not matches:
+        legacy_dir = UPLOAD_DIR / workspace
+        matches = list(legacy_dir.glob(f"{file_id}__*"))
     if not matches:
         raise HTTPException(status_code=404, detail="Document not found on disk.")
 

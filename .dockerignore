@@ -7,3 +7,9 @@ venv/
 uploads/
 chroma_db/
 workspace/
+.pytest_cache/
+tests/
+sample_files/
+*.db
+*.sqlite
+*.sqlite3

@@ -75,6 +75,8 @@ SUPPORTED_EXTENSIONS = (
 )
 
 
+from typing import Optional
+
 # ---------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------
@@ -89,9 +91,13 @@ def normalize_workspace(value: str) -> str:
     return value[:60] or "default"
 
 
-def get_workspace_dir(workspace: str) -> Path:
+def get_workspace_dir(workspace: str, user_id: Optional[int] = None, create: bool = False) -> Path:
     safe_workspace = normalize_workspace(workspace)
-    directory = UPLOAD_DIR / safe_workspace
-    directory.mkdir(parents=True, exist_ok=True)
+    if user_id is not None:
+        directory = UPLOAD_DIR / f"user_{user_id}" / safe_workspace
+    else:
+        directory = UPLOAD_DIR / safe_workspace
+    if create:
+        directory.mkdir(parents=True, exist_ok=True)
     return directory
 

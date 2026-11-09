@@ -8,7 +8,7 @@ from core import db, auth
 
 @pytest.fixture
 def temp_db(monkeypatch):
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         test_db = Path(tmpdir) / "test_auth_chat.db"
         monkeypatch.setattr(db, "SQLITE_DB_PATH", test_db)
         monkeypatch.setattr(auth, "SQLITE_DB_PATH", test_db)

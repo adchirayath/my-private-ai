@@ -131,6 +131,7 @@ def test_lifecycle_starter_prompts():
 def test_api_starter_prompts_endpoint():
     """Verify HTTP GET /api/chat/starter-prompts endpoint."""
     client = TestClient(app)
+    client.cookies.clear()
 
     # Empty workspace
     resp_empty = client.get("/api/chat/starter-prompts?workspace=api_empty_ws_xyz")
@@ -140,10 +141,37 @@ def test_api_starter_prompts_endpoint():
     assert data_empty["document_count"] == 0
     assert len(data_empty["chips"]) == 4
 
-    # Default workspace with existing documents
+    # Unauthenticated request to workspace with documents must return generic chips (no leak without login)
     resp_default = client.get("/api/chat/starter-prompts?workspace=default")
     assert resp_default.status_code == 200
     data_default = resp_default.json()
-    assert data_default["has_documents"] is True
-    assert data_default["document_count"] >= 1
+    assert data_default["has_documents"] is False
+    assert data_default["document_count"] == 0
     assert len(data_default["chips"]) == 4
+    assert data_default["chips"] == GENERIC_STARTER_CHIPS
+
+    # Authenticated request for a user with documents receives dynamic chips
+    import uuid
+    from core.auth import register_user
+    test_user = f"user_{uuid.uuid4().hex[:8]}"
+    auth_data = register_user(test_user, "password123")
+    user_id = auth_data["user_id"]
+    token = auth_data["token"]
+    save_document("doc_starter_auth_1", "default", "Financial_Summary.csv", 2048, 2, user_id=user_id)
+    try:
+        resp_auth = client.get(
+            "/api/chat/starter-prompts?workspace=default",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp_auth.status_code == 200
+        data_auth = resp_auth.json()
+        assert data_auth["has_documents"] is True
+        assert data_auth["document_count"] >= 1
+        assert len(data_auth["chips"]) == 4
+    finally:
+        delete_document("doc_starter_auth_1", "default")
+        import sqlite3
+        from core.config import SQLITE_DB_PATH
+        with sqlite3.connect(SQLITE_DB_PATH) as conn:
+            conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            conn.commit()

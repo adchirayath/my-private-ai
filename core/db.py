@@ -34,8 +34,11 @@ documents_collection = chroma_client.get_or_create_collection(
 def init_sqlite_db() -> None:
     """Initialize SQLite tables for persistent chat history, users, and sessions."""
     SQLITE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(SQLITE_DB_PATH) as conn:
-        conn.execute("PRAGMA journal_mode=WAL;")
+    with sqlite3.connect(SQLITE_DB_PATH, timeout=10.0) as conn:
+        try:
+            conn.execute("PRAGMA journal_mode=DELETE;")
+        except Exception:
+            pass
         conn.execute("PRAGMA foreign_keys = ON;")
 
         # 1. Users table
@@ -154,6 +157,37 @@ def init_sqlite_db() -> None:
                 content,
                 tokenize='porter unicode61'
             )
+        """)
+
+        # 6. Workspaces table for user-dependent workspace isolation
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS workspaces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                user_id INTEGER DEFAULT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_user_name
+            ON workspaces(user_id, name)
+            WHERE user_id IS NOT NULL
+        """)
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_anon_name
+            ON workspaces(name)
+            WHERE user_id IS NULL
+        """)
+
+        # Backfill pre-existing workspaces from documents and messages
+        conn.execute("""
+            INSERT OR IGNORE INTO workspaces (name, user_id)
+            SELECT DISTINCT workspace, user_id FROM documents WHERE workspace != 'default'
+        """)
+        conn.execute("""
+            INSERT OR IGNORE INTO workspaces (name, user_id)
+            SELECT DISTINCT workspace, user_id FROM messages WHERE workspace != 'default'
         """)
 
         conn.commit()
@@ -350,7 +384,7 @@ def list_documents_db(workspace: str, user_id: Optional[int] = None) -> list[dic
                 """
                 SELECT id, filename, file_size, chunk_count, created_at, user_id
                 FROM documents
-                WHERE workspace = ?
+                WHERE workspace = ? AND user_id IS NULL
                 ORDER BY created_at DESC
                 """,
                 (workspace,),
@@ -386,6 +420,7 @@ def get_workspace_document_counts(user_id: Optional[int] = None) -> dict[str, in
                 """
                 SELECT workspace, COUNT(*)
                 FROM documents
+                WHERE user_id IS NULL
                 GROUP BY workspace
                 """
             )
@@ -410,6 +445,7 @@ def get_workspace_chunk_counts(user_id: Optional[int] = None) -> dict[str, int]:
                 """
                 SELECT workspace, COALESCE(SUM(chunk_count), 0)
                 FROM documents
+                WHERE user_id IS NULL
                 GROUP BY workspace
                 """
             )
@@ -514,7 +550,7 @@ def search_fts_chunks(
                     """
                     SELECT chunk_id, file_id, filename, page_number, content, bm25(chunk_fts) as score
                     FROM chunk_fts
-                    WHERE workspace = ? AND chunk_fts MATCH ?
+                    WHERE workspace = ? AND (user_id IS NULL OR user_id = '') AND chunk_fts MATCH ?
                     ORDER BY score ASC
                     LIMIT ?
                     """,
@@ -637,6 +673,7 @@ def delete_workspace_messages(workspace: str, user_id: Optional[int] = None) -> 
             )
             conn.execute("DELETE FROM documents WHERE workspace = ? AND user_id = ?", (workspace, user_id))
             conn.execute("DELETE FROM chunk_fts WHERE workspace = ? AND user_id = ?", (workspace, str(user_id)))
+            conn.execute("DELETE FROM workspaces WHERE name = ? AND user_id = ?", (workspace, user_id))
         else:
             cursor = conn.execute(
                 "DELETE FROM messages WHERE workspace = ?",
@@ -644,12 +681,91 @@ def delete_workspace_messages(workspace: str, user_id: Optional[int] = None) -> 
             )
             conn.execute("DELETE FROM documents WHERE workspace = ?", (workspace,))
             conn.execute("DELETE FROM chunk_fts WHERE workspace = ?", (workspace,))
+            conn.execute("DELETE FROM workspaces WHERE name = ? AND user_id IS NULL", (workspace,))
         conn.commit()
         return cursor.rowcount
 
 
+def create_workspace_db(name: str, user_id: Optional[int] = None) -> bool:
+    """Register a workspace for a specific user (or unauthenticated/global if user_id is None)."""
+    clean_name = (name or "default").strip().lower()
+    if clean_name == "default":
+        return True
+    with sqlite3.connect(SQLITE_DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO workspaces (name, user_id)
+            VALUES (?, ?)
+            """,
+            (clean_name, user_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def delete_workspace_db(name: str, user_id: Optional[int] = None) -> bool:
+    """Delete workspace record and its associated data for the specified user."""
+    clean_name = (name or "").strip().lower()
+    if clean_name == "default":
+        return False
+    with sqlite3.connect(SQLITE_DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON;")
+        if user_id is not None:
+            cursor = conn.execute(
+                "DELETE FROM workspaces WHERE name = ? AND user_id = ?",
+                (clean_name, user_id),
+            )
+        else:
+            cursor = conn.execute(
+                "DELETE FROM workspaces WHERE name = ? AND user_id IS NULL",
+                (clean_name,),
+            )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def list_workspaces_db(user_id: Optional[int] = None) -> list[str]:
+    """
+    List distinct workspace names available to the specified user.
+    Always includes 'default'.
+    """
+    names = {"default"}
+    with sqlite3.connect(SQLITE_DB_PATH) as conn:
+        if user_id is not None:
+            cur = conn.execute("SELECT name FROM workspaces WHERE user_id = ?", (user_id,))
+            for row in cur.fetchall():
+                names.add(row[0])
+            cur = conn.execute("SELECT DISTINCT workspace FROM documents WHERE user_id = ?", (user_id,))
+            for row in cur.fetchall():
+                names.add(row[0])
+            cur = conn.execute("SELECT DISTINCT workspace FROM messages WHERE user_id = ?", (user_id,))
+            for row in cur.fetchall():
+                names.add(row[0])
+        else:
+            cur = conn.execute("SELECT name FROM workspaces WHERE user_id IS NULL")
+            for row in cur.fetchall():
+                names.add(row[0])
+            cur = conn.execute("SELECT DISTINCT workspace FROM documents WHERE user_id IS NULL")
+            for row in cur.fetchall():
+                names.add(row[0])
+            cur = conn.execute("SELECT DISTINCT workspace FROM messages WHERE user_id IS NULL")
+            for row in cur.fetchall():
+                names.add(row[0])
+
+    return sorted(names, key=lambda x: (x != "default", x))
+
+
+def workspace_exists_db(name: str, user_id: Optional[int] = None) -> bool:
+    """Check if a workspace exists for the specified user."""
+    clean_name = (name or "default").strip().lower()
+    if clean_name == "default":
+        return True
+    return clean_name in list_workspaces_db(user_id=user_id)
+
+
 def get_workspace_conversation_counts(user_id: Optional[int] = None) -> dict[str, int]:
-    """Return a mapping of workspace name -> distinct conversation count."""
+    """Return a mapping of workspace name -> distinct conversation count, scoped strictly to user."""
     with sqlite3.connect(SQLITE_DB_PATH) as conn:
         if user_id is not None:
             cursor = conn.execute(
@@ -666,6 +782,7 @@ def get_workspace_conversation_counts(user_id: Optional[int] = None) -> dict[str
                 """
                 SELECT workspace, COUNT(DISTINCT conversation_id)
                 FROM messages
+                WHERE user_id IS NULL
                 GROUP BY workspace
                 """
             )

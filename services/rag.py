@@ -208,7 +208,7 @@ async def search_documents_hybrid(
     where_filter = (
         {"$and": [{"workspace": workspace}, {"user_id": int(user_id)}]}
         if user_id is not None
-        else {"workspace": workspace}
+        else {"$and": [{"workspace": workspace}, {"user_id": 0}]}
     )
 
     # 1. Dense Semantic Query

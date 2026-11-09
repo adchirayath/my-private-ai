@@ -25,7 +25,7 @@
 
   <!-- Local Offline CSS Assets -->
   <link rel="stylesheet" href="/static/highlight.min.css">
-  <link rel="stylesheet" href="/static/style.css?v=2.2.0">
+  <link rel="stylesheet" href="/static/style.css?v=2.2.2">
 
   <!-- Local Offline JS Libraries (Markdown & Syntax Highlighting) -->
   <script src="/static/marked.min.js"></script>
@@ -128,8 +128,8 @@
           </button>
         </div>
 
-        <!-- Workspace Card -->
-        <div class="workspace-card collapsed" id="workspaceCard">
+        <!-- Workspace Card (Available only for authenticated users) -->
+        <div class="workspace-card collapsed" id="workspaceCard" style="display: none;">
           <div class="workspace-header" id="workspaceCardHeader" role="button" tabindex="0" title="Click to expand or collapse workspace" aria-expanded="false" aria-controls="workspaceCardBody">
             <div class="workspace-header-title-wrap">
               <span class="workspace-title">

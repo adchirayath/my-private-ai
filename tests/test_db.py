@@ -5,7 +5,7 @@ from core import db
 
 def test_sqlite_chat_persistence(monkeypatch):
     # Use temporary database for testing
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         test_db = Path(tmpdir) / "test_chat.db"
         monkeypatch.setattr(db, "SQLITE_DB_PATH", test_db)
         db.init_sqlite_db()
@@ -36,7 +36,7 @@ def test_sqlite_chat_persistence(monkeypatch):
 
 
 def test_list_conversations(monkeypatch):
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         test_db = Path(tmpdir) / "test_chat.db"
         monkeypatch.setattr(db, "SQLITE_DB_PATH", test_db)
         db.init_sqlite_db()
@@ -58,7 +58,7 @@ def test_list_conversations(monkeypatch):
 
 
 def test_workspace_isolation_and_deletion(monkeypatch):
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         test_db = Path(tmpdir) / "test_chat.db"
         monkeypatch.setattr(db, "SQLITE_DB_PATH", test_db)
         db.init_sqlite_db()

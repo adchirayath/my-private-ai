@@ -10,7 +10,7 @@ from core import db, auth
 
 @pytest.fixture
 def test_setup(monkeypatch):
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         test_db = Path(tmpdir) / "test_files_auth.db"
         upload_dir = Path(tmpdir) / "uploads"
         upload_dir.mkdir(parents=True, exist_ok=True)
@@ -98,8 +98,7 @@ def test_user_document_isolation(test_setup):
     assert files_b[0]["filename"] == "bob_report.txt"
 
     # 7. Unauthenticated list files -> empty
-    import httpx
-    client.cookies = httpx.Cookies()
+    client.cookies.clear()
     list_anon = client.get("/api/files?workspace=default")
     assert list_anon.status_code == 200
     assert list_anon.json()["files"] == []

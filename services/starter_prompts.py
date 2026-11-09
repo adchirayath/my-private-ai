@@ -106,7 +106,7 @@ def _extract_document_chunks(workspace: str, file_id: str, limit: int = 3, user_
                 cursor = conn.execute(
                     """
                     SELECT content FROM chunk_fts
-                    WHERE workspace = ? AND file_id = ?
+                    WHERE workspace = ? AND file_id = ? AND (user_id IS NULL OR user_id = '')
                     LIMIT ?
                     """,
                     (workspace, file_id, limit),
@@ -405,10 +405,6 @@ def get_starter_prompts(
     """
     workspace = normalize_workspace(workspace)
     docs = list_documents_db(workspace, user_id=user_id)
-
-    # Fallback for unauthenticated users if SQLite has no user_id entries
-    if not docs and user_id is None:
-        docs = list_documents_db(workspace)
 
     # 1. NO DOCUMENTS ATTACHED -> Generic Prompts
     if not docs:
