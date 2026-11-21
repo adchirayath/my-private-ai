@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>My Private AI - Your private documents, your hardware</title>
 
+  <!-- Browser Tab Icon (Favicon) -->
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="alternate icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+  <link rel="alternate icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+  <link rel="alternate icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+
   <!-- Early theme initialization to avoid flash of light theme -->
   <script>
     (function() {
@@ -25,7 +32,7 @@
 
   <!-- Local Offline CSS Assets -->
   <link rel="stylesheet" href="/static/highlight.min.css">
-  <link rel="stylesheet" href="/static/style.css?v=2.2.2">
+  <link rel="stylesheet" href="/static/style.css?v=2.3.1">
 
   <!-- Local Offline JS Libraries (Markdown & Syntax Highlighting) -->
   <script src="/static/marked.min.js"></script>
@@ -36,7 +43,7 @@
   <!-- =========================================================================
        1. Top Header: App Branding & Ollama Connection Status
        ========================================================================= -->
-  <header>
+  <header id="appHeader">
     <div class="brand">
       <div class="brand-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -63,31 +70,6 @@
         </span>
         <span id="themeToggleText" class="theme-toggle-text">Dark</span>
       </button>
-
-      <!-- Authentication / User Account Status -->
-      <div id="authHeaderContainer" class="auth-header-wrap">
-        <button id="headerLoginBtn" class="header-auth-btn" type="button" title="Sign in to save and access private chat history">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>
-          </svg>
-          <span>Sign In</span>
-        </button>
-        <div id="userProfileBadge" class="user-profile-badge" style="display: none;">
-          <span class="user-avatar-icon">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
-              <circle cx="12" cy="7" r="4"/>
-            </svg>
-          </span>
-          <span id="headerUsername" class="user-name-text">alex</span>
-          <button id="headerLogoutBtn" class="btn-logout" title="Sign out" type="button">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-
       <button id="helpBtn" class="header-help-btn" type="button" title="Open Beginner's Guide & Architecture Walkthrough (PDF)">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"/>
@@ -96,6 +78,121 @@
         </svg>
         <span>Help & Guide</span>
       </button>
+      <!-- Authentication / User Account Status -->
+      <div id="authHeaderContainer" class="auth-header-wrap">
+        <!-- Admin Dashboard Navigation Toggle -->
+        <button id="headerAdminBtn" class="header-admin-btn" type="button" title="Access Role-Based Admin Dashboard" style="display: none;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+          <span>Admin Panel</span>
+        </button>
+
+        <button id="headerLoginBtn" class="header-auth-btn" type="button" title="Sign in to save and access private chat history">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>
+          </svg>
+          <span>Sign In</span>
+        </button>
+        <div id="userProfileBadge" class="user-profile-badge" style="display: none;" tabindex="0" role="button" aria-haspopup="true" aria-expanded="false" title="Account profile & picture settings">
+          <div class="user-profile-badge-inner" id="userProfileBadgeTrigger">
+            <span class="user-avatar-icon" id="headerAvatarIcon">
+              <img id="headerAvatarImg" class="header-avatar-img" src="" alt="Profile picture" style="display: none;">
+              <svg id="headerAvatarDefaultSvg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+            </span>
+            <span id="headerUsername" class="user-name-text"></span>
+            <span class="user-dropdown-arrow-icon" aria-hidden="true">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </span>
+          </div>
+          <button id="headerLogoutBtn" class="btn-logout" title="Sign out" type="button" aria-label="Sign out">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+            </svg>
+          </button>
+
+          <!-- Hover Popup for headerUsername / user profile -->
+          <div id="userProfilePopup" class="user-profile-popup" role="dialog" aria-label="User profile details and picture options">
+            <div class="user-popup-header">
+              <div class="user-popup-avatar-container" id="userPopupAvatarWrap" title="Click or drop image to change profile picture">
+                <div class="user-popup-avatar-preview" id="userPopupAvatarPreview">
+                  <img id="popupAvatarImg" class="popup-avatar-img" src="" alt="User avatar" style="display: none;">
+                  <span id="popupAvatarDefaultIcon" class="popup-avatar-default-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
+                      <circle cx="12" cy="7" r="4"/>
+                    </svg>
+                  </span>
+                </div>
+                <button type="button" id="changeAvatarOverlayBtn" class="avatar-change-overlay" title="Upload new photo" aria-label="Upload photo">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                    <circle cx="12" cy="13" r="4"/>
+                  </svg>
+                </button>
+              </div>
+
+              <div class="user-popup-identity">
+                <div class="user-popup-name-row">
+                  <span id="popupUsername" class="user-popup-username"></span>
+                  <span class="user-popup-status-pill">Active</span>
+                </div>
+                <span id="popupUserId" class="user-popup-meta">User Account</span>
+                <span id="popupWorkspaceInfo" class="user-popup-ws-tag">Workspace: default</span>
+              </div>
+            </div>
+
+            <!-- Profile Picture Controls -->
+            <div class="user-popup-section">
+              <div class="user-popup-section-title">
+                <span>Profile Picture</span>
+                <span class="user-popup-section-hint">PNG, JPG, WebP up to 5MB</span>
+              </div>
+              <input type="file" id="userAvatarFileInput" accept="image/png,image/jpeg,image/jpg,image/webp,image/gif" style="display: none;">
+              
+              <div class="user-popup-actions">
+                <button type="button" id="uploadAvatarBtn" class="btn-avatar-action btn-avatar-upload">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                  <span>Upload Picture</span>
+                </button>
+                <button type="button" id="removeAvatarBtn" class="btn-avatar-action btn-avatar-remove" style="display: none;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  </svg>
+                  <span>Remove</span>
+                </button>
+              </div>
+              <div id="avatarStatusMsg" class="avatar-status-msg" style="display: none;"></div>
+            </div>
+
+            <!-- Footer Quick Actions -->
+            <div class="user-popup-footer">
+              <button type="button" id="popupAdminBtn" class="user-popup-admin-btn" style="display: none;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+                <span>Admin Dashboard</span>
+              </button>
+              <button type="button" id="popupLogoutBtn" class="user-popup-logout-btn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+                </svg>
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -497,6 +594,969 @@
     </section>
   </main>
 
+  <!-- =========================================================================
+       3. Admin Dashboard (Role-Based Access Control & ACL Management)
+       ========================================================================= -->
+  <div id="adminDashboardView" class="admin-dashboard-layout" style="display: none;" aria-label="Administration Panel">
+    <!-- Admin Sidebar Navigation -->
+    <aside id="adminSidebar" class="admin-sidebar">
+      <div class="admin-sidebar-header">
+        <div class="admin-sidebar-brand">
+          <div class="admin-shield-icon-wrap">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+          </div>
+          <div class="admin-sidebar-brand-text">
+            <h3>Administration</h3>
+            <span>RBAC &amp; ACL Control</span>
+          </div>
+        </div>
+        <button id="adminSidebarCollapseBtn" class="btn-icon admin-collapse-btn" title="Collapse administration sidebar" aria-label="Collapse administration sidebar">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Navigation Links -->
+      <nav class="admin-nav-menu" aria-label="Admin Navigation">
+        <div class="admin-nav-section-label">General</div>
+        <button type="button" class="admin-nav-item active" data-panel="overview" id="adminNavOverview" title="Overview" aria-label="Overview">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect width="7" height="9" x="3" y="3" rx="1"/>
+            <rect width="7" height="5" x="14" y="3" rx="1"/>
+            <rect width="7" height="9" x="14" y="12" rx="1"/>
+            <rect width="7" height="5" x="3" y="16" rx="1"/>
+          </svg>
+          <span>Overview</span>
+        </button>
+
+        <div class="admin-nav-section-label">Access Control</div>
+        <button type="button" class="admin-nav-item" data-panel="users" id="adminNavUsers" title="Users" aria-label="Users">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          <span>Users</span>
+          <span id="adminNavUserCount" class="admin-nav-pill">0</span>
+        </button>
+
+        <button type="button" class="admin-nav-item" data-panel="roles" id="adminNavRoles" title="Roles" aria-label="Roles">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+          <span>Roles</span>
+          <span id="adminNavRoleCount" class="admin-nav-pill">0</span>
+        </button>
+
+        <button type="button" class="admin-nav-item" data-panel="permissions" id="adminNavPermissions" title="Permissions &amp; ACL" aria-label="Permissions &amp; ACL">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="7.5" cy="15.5" r="5.5"/>
+            <path d="m21 2-9.6 9.6"/>
+            <path d="m15.5 7.5 3 3L22 7l-3-3"/>
+          </svg>
+          <span>Permissions &amp; ACL</span>
+        </button>
+
+        <div class="admin-nav-section-label">Governance &amp; Config</div>
+        <button type="button" class="admin-nav-item" data-panel="audit-logs" id="adminNavAuditLogs" title="Audit Logs" aria-label="Audit Logs">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <polyline points="10 9 9 9 8 9"/>
+          </svg>
+          <span>Audit Logs</span>
+        </button>
+
+        <button type="button" class="admin-nav-item" data-panel="settings" id="adminNavSettings" title="System Settings" aria-label="System Settings">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+          <span>System Settings</span>
+        </button>
+      </nav>
+
+      <!-- Bottom Exit Control -->
+      <div class="admin-sidebar-footer">
+        <button type="button" id="adminReturnToChatBtn" class="admin-nav-exit-btn" title="Return to Workspace" aria-label="Return to Workspace">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+          </svg>
+          <span>Return to Workspace</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Admin Main Body -->
+    <div class="admin-main-body">
+      <!-- Admin Top Navigation Bar -->
+      <header class="admin-topbar">
+        <div class="admin-topbar-left">
+          <button id="adminMobileMenuBtn" class="btn-icon admin-mobile-toggle" aria-label="Open administration navigation">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+          <div class="admin-breadcrumbs">
+            <span class="admin-breadcrumb-root">Administration</span>
+            <span class="admin-breadcrumb-sep">/</span>
+            <h2 id="adminCurrentSectionTitle" class="admin-breadcrumb-current">Overview</h2>
+          </div>
+        </div>
+
+        <div class="admin-topbar-right">
+          <!-- Dynamic Action Slot per panel -->
+          <div id="adminTopActionSlot" class="admin-top-action-slot"></div>
+
+          <!-- Theme Toggle inside Admin -->
+          <button type="button" id="adminThemeToggleBtn" class="admin-theme-btn" aria-label="Toggle theme" title="Toggle theme (Light/Dark)">
+            <span class="theme-icon-wrap">
+              <svg class="theme-moon-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+              </svg>
+              <svg class="theme-sun-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="4"/>
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+              </svg>
+            </span>
+          </button>
+
+          <!-- Active Admin Identity Badge -->
+          <div class="admin-identity-pill">
+            <span class="admin-identity-avatar" id="adminTopbarAvatar">A</span>
+            <div class="admin-identity-info">
+              <span id="adminTopbarUsername" class="admin-identity-name"></span>
+              <span id="adminTopbarRoleBadge" class="admin-badge-sa">Super Admin</span>
+            </div>
+          </div>
+
+          <!-- Exit Admin Button -->
+          <button type="button" id="adminTopbarExitBtn" class="admin-btn-exit" title="Exit Admin and return to private chat">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+            <span>Exit Admin</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Admin Panels Viewport -->
+      <div class="admin-content-viewport" id="adminContentViewport">
+        <!-- ===================================================================
+             PANEL 1: OVERVIEW & DASHBOARD METRICS
+             =================================================================== -->
+        <div id="adminPanelOverview" class="admin-panel active">
+          <!-- KPI Summary Cards Grid -->
+          <div class="admin-metrics-grid">
+            <!-- Metric 1: Users -->
+            <div class="admin-metric-card">
+              <div class="admin-metric-header">
+                <span class="admin-metric-label">Total Users</span>
+                <div class="admin-metric-icon-wrap icon-blue">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="admin-metric-val" id="adminStatTotalUsers">0</div>
+              <div class="admin-metric-footer">
+                <span id="adminStatActiveUsersPill" class="metric-pill metric-pill-success">0 active</span>
+                <span id="adminStatInactiveUsersPill" class="metric-pill metric-pill-muted">0 inactive</span>
+              </div>
+            </div>
+
+            <!-- Metric 2: Roles -->
+            <div class="admin-metric-card">
+              <div class="admin-metric-header">
+                <span class="admin-metric-label">Access Roles</span>
+                <div class="admin-metric-icon-wrap icon-purple">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="admin-metric-val" id="adminStatTotalRoles">0</div>
+              <div class="admin-metric-footer">
+                <span id="adminStatSystemRoles" class="metric-pill metric-pill-primary">5 System</span>
+                <span id="adminStatCustomRoles" class="metric-pill metric-pill-info">0 Custom</span>
+              </div>
+            </div>
+
+            <!-- Metric 3: Centralized Permissions -->
+            <div class="admin-metric-card">
+              <div class="admin-metric-header">
+                <span class="admin-metric-label">Centralized Permissions</span>
+                <div class="admin-metric-icon-wrap icon-amber">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="7.5" cy="15.5" r="5.5"/>
+                    <path d="m21 2-9.6 9.6"/>
+                    <path d="m15.5 7.5 3 3L22 7l-3-3"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="admin-metric-val" id="adminStatTotalPermissions">0</div>
+              <div class="admin-metric-footer">
+                <span class="metric-pill metric-pill-amber">8 Modules Governed</span>
+              </div>
+            </div>
+
+            <!-- Metric 4: Documents & Workspace -->
+            <div class="admin-metric-card">
+              <div class="admin-metric-header">
+                <span class="admin-metric-label">Indexed Documents</span>
+                <div class="admin-metric-icon-wrap icon-emerald">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="admin-metric-val" id="adminStatTotalDocs">0</div>
+              <div class="admin-metric-footer">
+                <span id="adminStatTotalChunks" class="metric-pill metric-pill-emerald">0 Chunks · Hybrid Search</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Actions Bar -->
+          <div class="admin-card-section" style="margin-top: 20px;">
+            <div class="admin-section-header">
+              <h3>Quick Administrative Actions</h3>
+              <p>Common tasks and shortcuts for system management</p>
+            </div>
+            <div class="admin-quick-actions-row">
+              <button type="button" id="adminQuickAddUserBtn" class="admin-quick-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                  <circle cx="9" cy="7" r="4"/>
+                  <line x1="19" y1="8" x2="19" y2="14"/>
+                  <line x1="22" y1="11" x2="16" y2="11"/>
+                </svg>
+                <div class="admin-quick-btn-text">
+                  <strong>Create User</strong>
+                  <span>Add account &amp; assign roles</span>
+                </div>
+              </button>
+
+              <button type="button" id="adminQuickAddRoleBtn" class="admin-quick-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                  <line x1="12" y1="8" x2="12" y2="14"/>
+                  <line x1="9" y1="11" x2="15" y2="11"/>
+                </svg>
+                <div class="admin-quick-btn-text">
+                  <strong>Create Role</strong>
+                  <span>Define custom role &amp; ACL</span>
+                </div>
+              </button>
+
+              <button type="button" id="adminQuickViewAuditBtn" class="admin-quick-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <div class="admin-quick-btn-text">
+                  <strong>Review Audit Trail</strong>
+                  <span>Inspect logs &amp; export</span>
+                </div>
+              </button>
+
+              <button type="button" id="adminQuickSettingsBtn" class="admin-quick-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                <div class="admin-quick-btn-text">
+                  <strong>System Settings</strong>
+                  <span>Configure security &amp; storage</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Dual Column: Recent User Activities & Recent Login History -->
+          <div class="admin-dual-feed-grid" style="margin-top: 20px;">
+            <!-- Left: Recent System Activities -->
+            <div class="admin-card-section">
+              <div class="admin-section-header">
+                <div class="admin-section-header-title">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
+                  </svg>
+                  <h3>Recent User Activities</h3>
+                </div>
+                <button type="button" id="adminRefreshOverviewBtn" class="btn-icon" title="Refresh metrics">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                  </svg>
+                </button>
+              </div>
+              <div id="adminRecentActivitiesList" class="admin-activity-stream">
+                <div class="admin-empty-state">Loading recent activity…</div>
+              </div>
+            </div>
+
+            <!-- Right: Recent Login History -->
+            <div class="admin-card-section">
+              <div class="admin-section-header">
+                <div class="admin-section-header-title">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>
+                  </svg>
+                  <h3>Recent Authentication Events</h3>
+                </div>
+                <span class="admin-tag-subtle">Security Trail</span>
+              </div>
+              <div id="adminRecentLoginsList" class="admin-activity-stream">
+                <div class="admin-empty-state">Loading login history…</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================================================================
+             PANEL 2: USER MANAGEMENT
+             =================================================================== -->
+        <div id="adminPanelUsers" class="admin-panel">
+          <!-- Toolbar & Search/Filter Controls -->
+          <div class="admin-toolbar-card">
+            <div class="admin-toolbar-row">
+              <div class="admin-search-wrapper">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                </svg>
+                <input type="text" id="adminUserSearchInput" class="admin-input-search" placeholder="Search by username…">
+              </div>
+
+              <div class="admin-filter-group">
+                <select id="adminUserRoleFilter" class="admin-select" aria-label="Filter by role">
+                  <option value="">All Roles</option>
+                </select>
+
+                <select id="adminUserStatusFilter" class="admin-select" aria-label="Filter by active status">
+                  <option value="">All Statuses</option>
+                  <option value="active">Active Only</option>
+                  <option value="inactive">Inactive Only</option>
+                </select>
+
+                <select id="adminUserSortBy" class="admin-select" aria-label="Sort users by">
+                  <option value="created_at">Sort: Created Date</option>
+                  <option value="last_login_at">Sort: Last Login</option>
+                  <option value="username">Sort: Username</option>
+                </select>
+
+                <button type="button" id="adminUserSortOrderBtn" class="btn-icon" title="Toggle sort order (Descending/Ascending)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="m3 16 4 4 4-4M7 20V4M21 8l-4-4-4 4M17 4v16"/>
+                  </svg>
+                </button>
+              </div>
+
+              <button type="button" id="adminOpenCreateUserModalBtn" class="btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                <span>Add User</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Users Data Table Card -->
+          <div class="admin-card-section" style="margin-top: 16px;">
+            <div class="admin-table-responsive">
+              <table class="admin-data-table" id="adminUsersTable">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Assigned Roles</th>
+                    <th>Status</th>
+                    <th>Last Login</th>
+                    <th>Created At</th>
+                    <th style="text-align: right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="adminUsersTableBody">
+                  <tr>
+                    <td colspan="6" class="admin-table-loading">Loading users…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Pagination Bar -->
+            <div class="admin-pagination-bar">
+              <div class="admin-pagination-info" id="adminUserPaginationInfo">
+                Showing 0-0 of 0 users
+              </div>
+              <div class="admin-pagination-actions">
+                <button type="button" id="adminUserPrevPageBtn" class="btn-secondary btn-sm" disabled>Previous</button>
+                <div id="adminUserPageNumbers" class="admin-page-numbers"></div>
+                <button type="button" id="adminUserNextPageBtn" class="btn-secondary btn-sm" disabled>Next</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================================================================
+             PANEL 3: ROLE MANAGEMENT
+             =================================================================== -->
+        <div id="adminPanelRoles" class="admin-panel">
+          <div class="admin-toolbar-card">
+            <div class="admin-toolbar-row">
+              <div class="admin-search-wrapper">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                </svg>
+                <input type="text" id="adminRoleSearchInput" class="admin-input-search" placeholder="Search roles by name or description…">
+              </div>
+
+              <button type="button" id="adminOpenCreateRoleModalBtn" class="btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                <span>Create Role</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="admin-card-section" style="margin-top: 16px;">
+            <div class="admin-table-responsive">
+              <table class="admin-data-table" id="adminRolesTable">
+                <thead>
+                  <tr>
+                    <th>Role Name</th>
+                    <th>Type</th>
+                    <th>Description</th>
+                    <th>Assigned Users</th>
+                    <th>Permissions</th>
+                    <th style="text-align: right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="adminRolesTableBody">
+                  <tr>
+                    <td colspan="6" class="admin-table-loading">Loading roles…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================================================================
+             PANEL 4: PERMISSIONS & ACL MANAGEMENT
+             =================================================================== -->
+        <div id="adminPanelPermissions" class="admin-panel">
+          <!-- Sub-Tab Navigation Switcher -->
+          <div class="admin-subtabs">
+            <button type="button" id="adminPermTabRegistryBtn" class="admin-subtab-btn active">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="7.5" cy="15.5" r="5.5"/>
+                <path d="m21 2-9.6 9.6"/>
+              </svg>
+              <span>Centralized Permission Registry</span>
+            </button>
+            <button type="button" id="adminPermTabOverridesBtn" class="admin-subtab-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+              </svg>
+              <span>User ACL Permission Overrides</span>
+            </button>
+          </div>
+
+          <!-- SUB-VIEW 1: REGISTRY -->
+          <div id="adminPermRegistryView" class="admin-subtab-view active">
+            <div class="admin-notice-bar">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+              </svg>
+              <span>Granular resource-based permissions mapped across all system modules. Follows the principle of least privilege: access is denied by default unless explicitly granted.</span>
+            </div>
+
+            <!-- Permission Modules Card Grid -->
+            <div id="adminPermissionsGrid" class="admin-permissions-grid" style="margin-top: 16px;">
+              <!-- Populated dynamically via JS -->
+            </div>
+          </div>
+
+          <!-- SUB-VIEW 2: USER PERMISSION OVERRIDES (ACL) -->
+          <div id="adminPermOverridesView" class="admin-subtab-view">
+            <div class="admin-toolbar-card">
+              <div class="admin-toolbar-row">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <label for="adminPermUserSelector" style="font-size: 13px; font-weight: 600; color: var(--text-main);">Select User to Inspect ACL:</label>
+                  <select id="adminPermUserSelector" class="admin-select" style="min-width: 220px;">
+                    <option value="">Select a user account…</option>
+                  </select>
+                </div>
+                <div id="adminPermUserRolesSummary" class="admin-tag-subtle">No user selected</div>
+              </div>
+            </div>
+
+            <div class="admin-card-section" style="margin-top: 16px;">
+              <div id="adminUserAclEmptyState" class="admin-empty-state">
+                Select a user above to inspect effective permissions and apply granular Allow / Deny ACL overrides.
+              </div>
+              <div id="adminUserAclTableWrap" class="admin-table-responsive" style="display: none;">
+                <table class="admin-data-table">
+                  <thead>
+                    <tr>
+                      <th>Module / Permission</th>
+                      <th>Action</th>
+                      <th>Effective Status</th>
+                      <th>Source / Origin</th>
+                      <th style="text-align: right;">Granular Override (ACL)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="adminUserAclTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================================================================
+             PANEL 5: AUDIT LOGS (READ-ONLY)
+             =================================================================== -->
+        <div id="adminPanelAuditLogs" class="admin-panel">
+          <!-- Toolbar & Filters -->
+          <div class="admin-toolbar-card">
+            <div class="admin-toolbar-row">
+              <div class="admin-search-wrapper">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                </svg>
+                <input type="text" id="adminAuditSearchInput" class="admin-input-search" placeholder="Search username, IP, action, or metadata…">
+              </div>
+
+              <div class="admin-filter-group">
+                <select id="adminAuditResourceFilter" class="admin-select" aria-label="Filter by module">
+                  <option value="">All Modules</option>
+                  <option value="auth">auth</option>
+                  <option value="users">users</option>
+                  <option value="roles">roles</option>
+                  <option value="permissions">permissions</option>
+                  <option value="settings">settings</option>
+                  <option value="documents">documents</option>
+                </select>
+
+                <select id="adminAuditActionFilter" class="admin-select" aria-label="Filter by action">
+                  <option value="">All Actions</option>
+                  <option value="auth.login">auth.login</option>
+                  <option value="auth.login_failed">auth.login_failed</option>
+                  <option value="auth.logout">auth.logout</option>
+                  <option value="user.create">user.create</option>
+                  <option value="user.update">user.update</option>
+                  <option value="user.delete">user.delete</option>
+                  <option value="user.roles_update">user.roles_update</option>
+                  <option value="user.password_reset">user.password_reset</option>
+                  <option value="role.create">role.create</option>
+                  <option value="role.update">role.update</option>
+                  <option value="role.delete">role.delete</option>
+                  <option value="acl.override_set">acl.override_set</option>
+                  <option value="settings.update">settings.update</option>
+                </select>
+              </div>
+
+              <div class="admin-export-group">
+                <button type="button" id="adminExportAuditCsvBtn" class="btn-secondary btn-sm" title="Download audit logs in CSV format">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                  </svg>
+                  <span>Export CSV</span>
+                </button>
+                <button type="button" id="adminExportAuditJsonBtn" class="btn-secondary btn-sm" title="Download audit logs in JSON format">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                  </svg>
+                  <span>Export JSON</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Immutability Notice -->
+          <div class="admin-notice-bar" style="margin-top: 12px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            <span>Immutable Security Audit Trail: records are strictly append-only and cannot be edited, modified, or cleared through the application.</span>
+          </div>
+
+          <!-- Audit Logs Table -->
+          <div class="admin-card-section" style="margin-top: 12px;">
+            <div class="admin-table-responsive">
+              <table class="admin-data-table" id="adminAuditTable">
+                <thead>
+                  <tr>
+                    <th>Timestamp (UTC)</th>
+                    <th>User</th>
+                    <th>Action</th>
+                    <th>Module</th>
+                    <th>IP Address</th>
+                    <th style="text-align: right;">Details</th>
+                  </tr>
+                </thead>
+                <tbody id="adminAuditTableBody">
+                  <tr>
+                    <td colspan="6" class="admin-table-loading">Loading audit records…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Audit Pagination -->
+            <div class="admin-pagination-bar">
+              <div class="admin-pagination-info" id="adminAuditPaginationInfo">
+                Showing 0-0 of 0 audit logs
+              </div>
+              <div class="admin-pagination-actions">
+                <button type="button" id="adminAuditPrevPageBtn" class="btn-secondary btn-sm" disabled>Previous</button>
+                <div id="adminAuditPageNumbers" class="admin-page-numbers"></div>
+                <button type="button" id="adminAuditNextPageBtn" class="btn-secondary btn-sm" disabled>Next</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================================================================
+             PANEL 6: SYSTEM SETTINGS
+             =================================================================== -->
+        <div id="adminPanelSettings" class="admin-panel">
+          <form id="adminSettingsForm">
+            <!-- Card 1: General Configuration -->
+            <div class="admin-card-section">
+              <div class="admin-section-header">
+                <h3>General Configuration</h3>
+                <p>Platform identity and onboarding policies</p>
+              </div>
+
+              <div class="admin-form-row">
+                <div class="admin-form-col">
+                  <label for="setting_app_name" class="admin-form-label">Application Name</label>
+                  <input type="text" id="setting_app_name" class="admin-input" required>
+                  <span class="admin-field-hint">Display name rendered in header and exports</span>
+                </div>
+
+                <div class="admin-form-col">
+                  <label for="setting_default_role" class="admin-form-label">Default Role for New Users</label>
+                  <select id="setting_default_role" class="admin-select" required></select>
+                  <span class="admin-field-hint">Automatically assigned during registration</span>
+                </div>
+              </div>
+
+              <div class="admin-toggle-row" style="margin-top: 16px;">
+                <div class="admin-toggle-info">
+                  <strong>Allow Public Self-Registration</strong>
+                  <span>When disabled, new accounts can only be created by an administrator</span>
+                </div>
+                <label class="admin-switch">
+                  <input type="checkbox" id="setting_allow_registration">
+                  <span class="admin-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Card 2: Security & Session Policies -->
+            <div class="admin-card-section" style="margin-top: 16px;">
+              <div class="admin-section-header">
+                <h3>Security &amp; Session Policies</h3>
+                <p>Authentication constraints and token lifetime</p>
+              </div>
+
+              <div class="admin-form-row">
+                <div class="admin-form-col">
+                  <label for="setting_session_timeout_days" class="admin-form-label">Session Lifetime (Days)</label>
+                  <input type="number" id="setting_session_timeout_days" class="admin-input" min="1" max="365" required>
+                  <span class="admin-field-hint">Active tokens expire after this duration</span>
+                </div>
+
+                <div class="admin-form-col">
+                  <label for="setting_password_min_length" class="admin-form-label">Minimum Password Length</label>
+                  <input type="number" id="setting_password_min_length" class="admin-input" min="4" max="32" required>
+                  <span class="admin-field-hint">Required minimum character count</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card 3: Storage & System Controls -->
+            <div class="admin-card-section" style="margin-top: 16px;">
+              <div class="admin-section-header">
+                <h3>Storage &amp; Maintenance Policies</h3>
+                <p>Document ingestion and system availability</p>
+              </div>
+
+              <div class="admin-form-row">
+                <div class="admin-form-col">
+                  <label for="setting_max_file_upload_mb" class="admin-form-label">Maximum Upload Size (MB)</label>
+                  <input type="number" id="setting_max_file_upload_mb" class="admin-input" min="1" max="500" required>
+                  <span class="admin-field-hint">Limit per document upload</span>
+                </div>
+
+                <div class="admin-form-col">
+                  <div class="admin-toggle-info" style="margin-top: 8px;">
+                    <strong>Maintenance Mode</strong>
+                    <span>Temporarily restrict non-administrative operations</span>
+                  </div>
+                  <label class="admin-switch" style="margin-top: 8px;">
+                    <input type="checkbox" id="setting_maintenance_mode">
+                    <span class="admin-slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Settings Submit Action -->
+            <div class="admin-form-actions-bar" style="margin-top: 18px;">
+              <div id="adminSettingsSaveStatus" class="admin-save-status"></div>
+              <button type="submit" id="adminSaveSettingsBtn" class="btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                  <polyline points="17 21 17 13 7 13 7 21"/>
+                  <polyline points="7 3 7 8 15 8"/>
+                </svg>
+                <span>Save System Settings</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Stack -->
+  <div id="adminToastContainer" class="admin-toast-container" aria-live="polite"></div>
+
+  <!-- Modal Dialog: Create / Edit User -->
+  <dialog id="adminUserModal" class="modal-dialog">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+            </svg>
+          </div>
+          <h3 id="adminUserModalTitle">Create User</h3>
+        </div>
+        <button id="closeAdminUserModalBtn" class="btn-icon" type="button" title="Close (Esc)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <form id="adminUserForm">
+        <input type="hidden" id="adminUserModalUserId" value="">
+        <div class="modal-body-content">
+          <div id="adminUserModalError" class="auth-error-alert" style="display: none;"></div>
+
+          <div class="form-group">
+            <label for="adminUserModalUsername">Username</label>
+            <input type="text" id="adminUserModalUsername" required minlength="3" maxlength="30" placeholder="e.g. jdoe">
+            <span class="field-hint">3-30 letters, numbers, or dashes</span>
+          </div>
+
+          <div class="form-group" id="adminUserModalPasswordGroup">
+            <label for="adminUserModalPassword">Password</label>
+            <input type="password" id="adminUserModalPassword" minlength="4" placeholder="Enter secure password">
+            <span class="field-hint" id="adminUserModalPasswordHint">Minimum 4 characters</span>
+          </div>
+
+          <div class="form-group" style="margin-top: 12px;">
+            <label>Assigned Roles</label>
+            <div id="adminUserModalRolesList" class="admin-roles-checklist">
+              <!-- Checkboxes populated via JS -->
+            </div>
+            <span class="field-hint">User inherits combined permissions from all selected roles</span>
+          </div>
+
+          <div class="admin-toggle-row" style="margin-top: 14px;">
+            <div class="admin-toggle-info">
+              <strong>Account Active</strong>
+              <span>Inactive users cannot sign in</span>
+            </div>
+            <label class="admin-switch">
+              <input type="checkbox" id="adminUserModalActiveSwitch" checked>
+              <span class="admin-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 18px;">
+          <button type="button" id="cancelAdminUserModalBtn" class="btn-secondary">Cancel</button>
+          <button type="submit" id="saveAdminUserModalBtn" class="btn-primary">
+            <span id="saveAdminUserModalBtnText">Save User</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Modal Dialog: Reset User Password -->
+  <dialog id="adminPasswordModal" class="modal-dialog modal-prompt-dialog">
+    <div class="modal-card modal-prompt-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon icon-amber">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+          </div>
+          <h3>Reset User Password</h3>
+        </div>
+        <button id="closeAdminPasswordModalBtn" class="btn-icon" type="button" title="Close (Esc)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <form id="adminPasswordForm">
+        <input type="hidden" id="adminPasswordUserId" value="">
+        <div class="modal-prompt-body">
+          <p class="modal-desc">
+            Reset password for <strong id="adminPasswordUsernameText">user</strong>. Any active sessions for this account will be invalidated immediately.
+          </p>
+          <div id="adminPasswordModalError" class="auth-error-alert" style="display: none; margin-bottom: 10px;"></div>
+          <div class="form-group">
+            <label for="adminNewPasswordInput">New Password</label>
+            <input type="password" id="adminNewPasswordInput" required minlength="4" placeholder="Enter new password">
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="cancelAdminPasswordBtn" class="btn-secondary">Cancel</button>
+          <button type="submit" id="confirmAdminPasswordBtn" class="btn-primary">Reset Password</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Modal Dialog: Create / Edit Role -->
+  <dialog id="adminRoleModal" class="modal-dialog modal-models-dialog">
+    <div class="modal-card modal-models-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+          </div>
+          <h3 id="adminRoleModalTitle">Create Role</h3>
+        </div>
+        <button id="closeAdminRoleModalBtn" class="btn-icon" type="button" title="Close (Esc)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <form id="adminRoleForm">
+        <input type="hidden" id="adminRoleModalRoleId" value="">
+        <div class="modal-body-content modal-models-body">
+          <div id="adminRoleModalError" class="auth-error-alert" style="display: none; margin-bottom: 12px;"></div>
+
+          <div class="admin-form-row">
+            <div class="admin-form-col">
+              <label for="adminRoleModalName" class="admin-form-label">Role Name</label>
+              <input type="text" id="adminRoleModalName" class="admin-input" required minlength="2" maxlength="50" placeholder="e.g. Compliance Officer">
+            </div>
+            <div class="admin-form-col">
+              <label for="adminRoleModalDesc" class="admin-form-label">Description</label>
+              <input type="text" id="adminRoleModalDesc" class="admin-input" placeholder="e.g. Handles security audits & reports">
+            </div>
+          </div>
+
+          <div style="margin-top: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <label class="admin-form-label" style="margin: 0;">Configure Module Permissions</label>
+              <div style="display: flex; gap: 8px;">
+                <button type="button" id="adminRoleSelectAllPermsBtn" class="btn-secondary btn-sm" style="font-size: 11px;">Select All</button>
+                <button type="button" id="adminRoleDeselectAllPermsBtn" class="btn-secondary btn-sm" style="font-size: 11px;">Clear All</button>
+              </div>
+            </div>
+            <div id="adminRolePermissionsChecklist" class="admin-role-perms-checklist">
+              <!-- Modules & checkboxes populated dynamically via JS -->
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 18px;">
+          <button type="button" id="cancelAdminRoleModalBtn" class="btn-secondary">Cancel</button>
+          <button type="submit" id="saveAdminRoleModalBtn" class="btn-primary">
+            <span id="saveAdminRoleModalBtnText">Save Role</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Modal Dialog: Audit Log Details -->
+  <dialog id="adminAuditDetailModal" class="modal-dialog">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+          </div>
+          <h3>Audit Log Details</h3>
+        </div>
+        <button id="closeAdminAuditDetailModalBtn" class="btn-icon" type="button" title="Close (Esc)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body-content">
+        <div class="admin-audit-detail-summary">
+          <div><strong>Action:</strong> <span id="auditDetailAction"></span></div>
+          <div><strong>User:</strong> <span id="auditDetailUser"></span></div>
+          <div><strong>Module:</strong> <span id="auditDetailResource"></span></div>
+          <div><strong>IP Address:</strong> <span id="auditDetailIp"></span></div>
+          <div><strong>Timestamp:</strong> <span id="auditDetailTimestamp"></span></div>
+        </div>
+
+        <div style="margin-top: 14px;">
+          <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">Event Metadata (JSON)</label>
+          <pre id="auditDetailJson" class="preview-code-block" style="max-height: 250px; overflow-y: auto;"></pre>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top: 14px;">
+        <button type="button" id="copyAuditDetailJsonBtn" class="btn-secondary">Copy Metadata</button>
+        <button type="button" id="doneAuditDetailModalBtn" class="btn-primary">Close</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- Modal Dialog: Create New Workspace -->
   <dialog id="newWorkspaceDialog" class="modal-dialog">
     <div class="modal-card">
@@ -585,7 +1645,7 @@
           <input 
             type="text" 
             id="authUsernameInput" 
-            placeholder="e.g. alex" 
+            placeholder="Username" 
             required 
             maxlength="30"
             autocomplete="username"
@@ -946,6 +2006,6 @@
   </dialog>
 
   <!-- Application Logic -->
-  <script src="/static/app.js?v=2.2.1"></script>
+  <script src="/static/app.js?v=2.3.1"></script>
 </body>
 </html>

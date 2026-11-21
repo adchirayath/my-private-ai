@@ -506,29 +506,348 @@ async function authFetch(url, options = {}) {
   return fetch(url, options);
 }
 
+let profilePopupCloseTimer = null;
+
+function updateAvatarUI(avatarDataUri) {
+  const headerImg = $("headerAvatarImg");
+  const headerDefault = $("headerAvatarDefaultSvg");
+  const popupImg = $("popupAvatarImg");
+  const popupDefault = $("popupAvatarDefaultIcon");
+  const removeBtn = $("removeAvatarBtn");
+
+  if (avatarDataUri) {
+    if (headerImg) {
+      headerImg.src = avatarDataUri;
+      headerImg.style.display = "block";
+    }
+    if (headerDefault) headerDefault.style.display = "none";
+    if (popupImg) {
+      popupImg.src = avatarDataUri;
+      popupImg.style.display = "block";
+    }
+    if (popupDefault) popupDefault.style.display = "none";
+    if (removeBtn) removeBtn.style.display = "inline-flex";
+  } else {
+    if (headerImg) {
+      headerImg.src = "";
+      headerImg.style.display = "none";
+    }
+    if (headerDefault) headerDefault.style.display = "block";
+    if (popupImg) {
+      popupImg.src = "";
+      popupImg.style.display = "none";
+    }
+    if (popupDefault) popupDefault.style.display = "flex";
+    if (removeBtn) removeBtn.style.display = "none";
+  }
+}
+
+function openProfilePopup() {
+  if (profilePopupCloseTimer) {
+    clearTimeout(profilePopupCloseTimer);
+    profilePopupCloseTimer = null;
+  }
+  const popup = $("userProfilePopup");
+  const badge = $("userProfileBadge");
+  if (popup) {
+    popup.classList.add("is-open");
+    popup.setAttribute("aria-hidden", "false");
+  }
+  if (badge) {
+    badge.classList.add("popup-open");
+    badge.setAttribute("aria-expanded", "true");
+  }
+}
+
+function closeProfilePopup() {
+  const popup = $("userProfilePopup");
+  const badge = $("userProfileBadge");
+  if (popup) {
+    popup.classList.remove("is-open");
+    popup.setAttribute("aria-hidden", "true");
+  }
+  if (badge) {
+    badge.classList.remove("popup-open");
+    badge.setAttribute("aria-expanded", "false");
+  }
+}
+
+function scheduleProfilePopupClose(delay = 220) {
+  if (profilePopupCloseTimer) clearTimeout(profilePopupCloseTimer);
+  profilePopupCloseTimer = setTimeout(() => {
+    closeProfilePopup();
+  }, delay);
+}
+
+function setAvatarStatusMessage(msg, isSuccess = true) {
+  const statusEl = $("avatarStatusMsg");
+  if (!statusEl) return;
+  if (!msg) {
+    statusEl.textContent = "";
+    statusEl.style.display = "none";
+    statusEl.className = "avatar-status-msg";
+    return;
+  }
+  statusEl.textContent = msg;
+  statusEl.className = `avatar-status-msg ${isSuccess ? "success" : "error"}`;
+  statusEl.style.display = "block";
+  if (isSuccess) {
+    setTimeout(() => {
+      if (statusEl.textContent === msg) {
+        statusEl.style.display = "none";
+      }
+    }, 3500);
+  }
+}
+
+async function uploadProfilePicture(file) {
+  if (!file) return;
+  const validExts = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"];
+  const fileName = (file.name || "").toLowerCase();
+  const isImage = file.type.startsWith("image/") || validExts.some(ext => fileName.endsWith(ext));
+  if (!isImage) {
+    setAvatarStatusMessage("Please select a valid image file (PNG, JPG, WebP, GIF).", false);
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    setAvatarStatusMessage("Image file is too large (max 5 MB).", false);
+    return;
+  }
+
+  const uploadBtn = $("uploadAvatarBtn");
+  if (uploadBtn) uploadBtn.disabled = true;
+  setAvatarStatusMessage("Uploading and optimizing picture...", true);
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await authFetch("/api/auth/avatar", {
+      method: "POST",
+      body: formData,
+    });
+    let data;
+    try {
+      data = await res.json();
+    } catch (_) {
+      data = { detail: res.statusText || `Server responded with status ${res.status}` };
+    }
+    if (!res.ok) {
+      throw new Error(data.detail || `Upload failed (${res.status})`);
+    }
+    if (currentUser) {
+      currentUser.avatar = data.avatar;
+    }
+    updateAvatarUI(data.avatar);
+    setAvatarStatusMessage("Profile picture updated successfully!", true);
+  } catch (err) {
+    setAvatarStatusMessage(err.message || "Upload failed. Please try again.", false);
+  } finally {
+    if (uploadBtn) uploadBtn.disabled = false;
+    const fileInput = $("userAvatarFileInput");
+    if (fileInput) fileInput.value = "";
+  }
+}
+
+async function removeProfilePicture() {
+  const removeBtn = $("removeAvatarBtn");
+  if (removeBtn) removeBtn.disabled = true;
+  setAvatarStatusMessage("Removing picture...", true);
+
+  try {
+    const res = await authFetch("/api/auth/avatar", {
+      method: "DELETE",
+    });
+    let data;
+    try {
+      data = await res.json();
+    } catch (_) {
+      data = { detail: res.statusText || `Server responded with status ${res.status}` };
+    }
+    if (!res.ok) {
+      throw new Error(data.detail || `Removal failed (${res.status})`);
+    }
+    if (currentUser) {
+      currentUser.avatar = null;
+    }
+    updateAvatarUI(null);
+    setAvatarStatusMessage("Profile picture removed.", true);
+  } catch (err) {
+    setAvatarStatusMessage(err.message || "Failed to remove picture.", false);
+  } finally {
+    if (removeBtn) removeBtn.disabled = false;
+  }
+}
+
+function initUserProfileEvents() {
+  const badge = $("userProfileBadge");
+  const badgeTrigger = $("userProfileBadgeTrigger");
+  const popup = $("userProfilePopup");
+  const avatarWrap = $("userPopupAvatarWrap");
+  const changeOverlayBtn = $("changeAvatarOverlayBtn");
+  const uploadBtn = $("uploadAvatarBtn");
+  const removeBtn = $("removeAvatarBtn");
+  const fileInput = $("userAvatarFileInput");
+  const popupLogoutBtn = $("popupLogoutBtn");
+
+  // Hover triggers for badge
+  if (badge) {
+    badge.addEventListener("mouseenter", () => {
+      openProfilePopup();
+    });
+    badge.addEventListener("mouseleave", () => {
+      scheduleProfilePopupClose(220);
+    });
+  }
+
+  // Click toggle on trigger (avatar + username)
+  if (badgeTrigger) {
+    badgeTrigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const isOpen = popup && popup.classList.contains("is-open");
+      if (isOpen) {
+        closeProfilePopup();
+      } else {
+        openProfilePopup();
+      }
+    });
+  }
+
+  // Keep popup open when hovering inside
+  if (popup) {
+    popup.addEventListener("mouseenter", () => {
+      if (profilePopupCloseTimer) {
+        clearTimeout(profilePopupCloseTimer);
+        profilePopupCloseTimer = null;
+      }
+    });
+    popup.addEventListener("mouseleave", () => {
+      scheduleProfilePopupClose(220);
+    });
+    // Stop propagation so clicking inside does not close popup
+    popup.addEventListener("click", (e) => {
+      e.stopPropagation();
+    });
+  }
+
+  // File input change
+  if (fileInput) {
+    fileInput.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (file) uploadProfilePicture(file);
+    });
+  }
+
+  // Upload button & overlay button trigger file input
+  if (uploadBtn && fileInput) {
+    uploadBtn.addEventListener("click", () => fileInput.click());
+  }
+  if (changeOverlayBtn && fileInput) {
+    changeOverlayBtn.addEventListener("click", () => fileInput.click());
+  }
+  if (avatarWrap && fileInput) {
+    avatarWrap.addEventListener("click", (e) => {
+      if (e.target !== changeOverlayBtn && !changeOverlayBtn.contains(e.target)) {
+        fileInput.click();
+      }
+    });
+
+    // Drag and drop image onto avatar preview
+    avatarWrap.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      avatarWrap.classList.add("is-dragover");
+    });
+    avatarWrap.addEventListener("dragleave", () => {
+      avatarWrap.classList.remove("is-dragover");
+    });
+    avatarWrap.addEventListener("drop", (e) => {
+      e.preventDefault();
+      avatarWrap.classList.remove("is-dragover");
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        uploadProfilePicture(e.dataTransfer.files[0]);
+      }
+    });
+  }
+
+  // Remove avatar button
+  if (removeBtn) {
+    removeBtn.addEventListener("click", () => removeProfilePicture());
+  }
+
+  // Popup Logout button
+  if (popupLogoutBtn) {
+    popupLogoutBtn.addEventListener("click", () => {
+      closeProfilePopup();
+      handleLogout();
+    });
+  }
+
+  // Global close on click outside or Escape key
+  document.addEventListener("click", (e) => {
+    if (badge && !badge.contains(e.target)) {
+      closeProfilePopup();
+    }
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeProfilePopup();
+    }
+  });
+}
+
 function updateAuthUI() {
   const loginBtn = $("headerLoginBtn");
   const profileBadge = $("userProfileBadge");
   const usernameSpan = $("headerUsername");
   const workspaceCard = $("workspaceCard");
+  const headerAdminBtn = $("headerAdminBtn");
+  const popupAdminBtn = $("popupAdminBtn");
 
   if (currentUser) {
     if (loginBtn) loginBtn.style.display = "none";
     if (profileBadge) profileBadge.style.display = "inline-flex";
     if (usernameSpan) usernameSpan.textContent = currentUser.username;
     if (workspaceCard) workspaceCard.style.display = "block";
+    if (headerAdminBtn) headerAdminBtn.style.display = currentUser.is_admin ? "inline-flex" : "none";
+    if (popupAdminBtn) popupAdminBtn.style.display = currentUser.is_admin ? "inline-flex" : "none";
     showChatUnlockedState();
     showFilesUnlockedState();
     const userDocsTitle = $("userDocsSectionTitle");
     if (userDocsTitle) userDocsTitle.textContent = `${currentUser.username}'s Documents`;
+
+    // Populate popup details
+    const popupUsername = $("popupUsername");
+    if (popupUsername) popupUsername.textContent = currentUser.username;
+    const popupUserId = $("popupUserId");
+    const roleLabel = (currentUser.roles && currentUser.roles.length) ? currentUser.roles.join(", ") : "User";
+    if (popupUserId) popupUserId.textContent = `User #${currentUser.id} · ${roleLabel}`;
+    const popupWs = $("popupWorkspaceInfo");
+    if (popupWs) popupWs.textContent = `Workspace: ${getWorkspace()}`;
+
+    // Update Admin topbar identity if rendered
+    const adminTopUser = $("adminTopbarUsername");
+    if (adminTopUser) adminTopUser.textContent = currentUser.username;
+    const adminTopAvatar = $("adminTopbarAvatar");
+    if (adminTopAvatar) adminTopAvatar.textContent = (currentUser.username || "A").charAt(0).toUpperCase();
+    const adminTopRole = $("adminTopbarRoleBadge");
+    if (adminTopRole) {
+      adminTopRole.textContent = currentUser.is_super_admin ? "Super Admin" : (currentUser.roles[0] || "Admin");
+    }
+
+    updateAvatarUI(currentUser.avatar);
   } else {
     if (loginBtn) loginBtn.style.display = "inline-flex";
     if (profileBadge) profileBadge.style.display = "none";
     if (workspaceCard) workspaceCard.style.display = "none";
+    if (headerAdminBtn) headerAdminBtn.style.display = "none";
+    if (popupAdminBtn) popupAdminBtn.style.display = "none";
     showChatLockedState();
     showFilesLockedState();
     const userDocsTitle = $("userDocsSectionTitle");
     if (userDocsTitle) userDocsTitle.textContent = `Your Documents`;
+    updateAvatarUI(null);
+    closeProfilePopup();
+    hideAdminDashboard();
   }
 }
 
@@ -583,7 +902,15 @@ async function checkAuthStatus() {
     if (!res.ok) throw new Error("Auth check failed");
     const data = await res.json();
     if (data.authenticated) {
-      currentUser = { id: data.user_id, username: data.username };
+      currentUser = {
+        id: data.user_id,
+        username: data.username,
+        avatar: data.avatar || null,
+        roles: data.roles || [],
+        permissions: data.permissions || [],
+        is_super_admin: !!data.is_super_admin,
+        is_admin: !!data.is_admin,
+      };
     } else {
       currentUser = null;
     }
@@ -657,6 +984,11 @@ function updateWorkspaceUI() {
   if (activeBadge) {
     activeBadge.textContent = activeWs;
     activeBadge.title = `Active workspace: ${activeWs}`;
+  }
+
+  const popupWs = $("popupWorkspaceInfo");
+  if (popupWs) {
+    popupWs.textContent = `Workspace: ${activeWs}`;
   }
 }
 
@@ -1448,9 +1780,13 @@ function appendMessageRow(role, contentHtml = "") {
 
   const avatar = document.createElement("div");
   avatar.className = `avatar ${role}`;
-  avatar.innerHTML = role === "user" 
-    ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`
-    : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
+  if (role === "user" && currentUser && currentUser.avatar) {
+    avatar.innerHTML = `<img src="${currentUser.avatar}" alt="${currentUser.username || 'User'}" class="user-msg-avatar-img">`;
+  } else {
+    avatar.innerHTML = role === "user" 
+      ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`
+      : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`;
+  }
 
   const bubble = document.createElement("div");
   bubble.className = "msg-bubble";
@@ -2658,7 +2994,7 @@ if (authForm) {
       }
 
       setAuthToken(data.token);
-      currentUser = { id: data.user_id, username: data.username };
+      currentUser = { id: data.user_id, username: data.username, avatar: data.avatar || null };
       updateAuthUI();
       closeAuthModal();
 
@@ -3702,6 +4038,1491 @@ function initChatAttach() {
   });
 }
 
+// ==============================================================================
+// 21. Admin Dashboard (RBAC & Centralized ACL Management Controller)
+// ==============================================================================
+
+let adminCurrentPanel = "overview";
+let adminUsersCache = [];
+let adminUsersPage = 1;
+let adminUsersTotalPages = 1;
+let adminUserSortOrder = "desc";
+let adminRolesCache = [];
+let adminPermissionsCache = { permissions: [], grouped: {} };
+let adminAuditPage = 1;
+let adminAuditTotalPages = 1;
+let adminSelectedAclUserId = null;
+
+function showAdminToast(message, type = "success") {
+  const container = $("adminToastContainer");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = `admin-toast admin-toast-${type}`;
+
+  let iconSvg = "";
+  if (type === "success") {
+    iconSvg = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>`;
+  } else if (type === "error") {
+    iconSvg = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`;
+  } else {
+    iconSvg = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
+  }
+
+  toast.innerHTML = `${iconSvg}<span>${escapeHtml(message)}</span>`;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateY(-6px)";
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 250);
+  }, 3500);
+}
+
+function showAdminDashboard(panelName = "overview") {
+  if (!currentUser || !currentUser.is_admin) {
+    showAdminToast("Access denied. Administrative privileges required.", "error");
+    return;
+  }
+
+  const appHeader = $("appHeader") || document.querySelector("header:not(.admin-topbar)");
+  const appMain = $("appMain");
+  const adminView = $("adminDashboardView");
+  if (appHeader) appHeader.style.display = "none";
+  if (appMain) appMain.style.display = "none";
+  if (adminView) adminView.style.display = "flex";
+
+  switchAdminPanel(panelName);
+  try {
+    history.pushState(null, null, `#admin/${panelName}`);
+  } catch (e) {}
+}
+
+function hideAdminDashboard() {
+  const appHeader = $("appHeader") || document.querySelector("header:not(.admin-topbar)");
+  const adminView = $("adminDashboardView");
+  const appMain = $("appMain");
+  if (adminView) adminView.style.display = "none";
+  if (appHeader) appHeader.style.display = "";
+  if (appMain) appMain.style.display = "";
+
+  if (window.location.hash.startsWith("#admin")) {
+    try {
+      history.pushState(null, null, window.location.pathname);
+    } catch (e) {}
+  }
+}
+
+function switchAdminPanel(panelName) {
+  adminCurrentPanel = panelName || "overview";
+
+  // Update nav buttons
+  const navBtns = document.querySelectorAll(".admin-nav-item");
+  navBtns.forEach((btn) => {
+    if (btn.dataset.panel === adminCurrentPanel) {
+      btn.classList.add("active");
+    } else {
+      btn.classList.remove("active");
+    }
+  });
+
+  // Update breadcrumb section title
+  const titleEl = $("adminCurrentSectionTitle");
+  const titles = {
+    overview: "Overview",
+    users: "Users",
+    roles: "Roles",
+    permissions: "Permissions & ACL",
+    "audit-logs": "Audit Logs",
+    settings: "System Settings",
+  };
+  if (titleEl) titleEl.textContent = titles[adminCurrentPanel] || "Overview";
+
+  // Show corresponding panel
+  const panels = document.querySelectorAll(".admin-panel");
+  panels.forEach((p) => p.classList.remove("active"));
+
+  const panelIdMap = {
+    overview: "adminPanelOverview",
+    users: "adminPanelUsers",
+    roles: "adminPanelRoles",
+    permissions: "adminPanelPermissions",
+    "audit-logs": "adminPanelAuditLogs",
+    settings: "adminPanelSettings",
+  };
+  const targetPanel = $(panelIdMap[adminCurrentPanel]);
+  if (targetPanel) targetPanel.classList.add("active");
+
+  // Load content
+  if (adminCurrentPanel === "overview") loadAdminOverview();
+  else if (adminCurrentPanel === "users") loadAdminUsers(1);
+  else if (adminCurrentPanel === "roles") loadAdminRoles();
+  else if (adminCurrentPanel === "permissions") loadAdminPermissions();
+  else if (adminCurrentPanel === "audit-logs") loadAdminAuditLogs(1);
+  else if (adminCurrentPanel === "settings") loadAdminSettings();
+}
+
+// -----------------------------------------------------------------------------
+// Overview Panel
+// -----------------------------------------------------------------------------
+
+async function loadAdminOverview() {
+  try {
+    const res = await authFetch("/api/admin/overview");
+    if (!res.ok) throw new Error("Failed to load overview data");
+    const data = await res.json();
+    const ov = data.overview || {};
+
+    // Stats metrics
+    if ($("adminStatTotalUsers")) $("adminStatTotalUsers").textContent = ov.users?.total ?? 0;
+    if ($("adminStatActiveUsersPill")) $("adminStatActiveUsersPill").textContent = `${ov.users?.active ?? 0} active`;
+    if ($("adminStatInactiveUsersPill")) $("adminStatInactiveUsersPill").textContent = `${ov.users?.inactive ?? 0} inactive`;
+
+    if ($("adminStatTotalRoles")) $("adminStatTotalRoles").textContent = ov.roles?.total ?? 0;
+    if ($("adminStatSystemRoles")) $("adminStatSystemRoles").textContent = `${ov.roles?.system ?? 0} System`;
+    if ($("adminStatCustomRoles")) $("adminStatCustomRoles").textContent = `${ov.roles?.custom ?? 0} Custom`;
+
+    if ($("adminStatTotalPermissions")) $("adminStatTotalPermissions").textContent = ov.permissions?.total ?? 0;
+
+    if ($("adminStatTotalDocs")) $("adminStatTotalDocs").textContent = ov.content?.total_documents ?? 0;
+    if ($("adminStatTotalChunks")) $("adminStatTotalChunks").textContent = `${ov.content?.total_chunks ?? 0} Chunks Indexed`;
+
+    // Sidebar counter badges
+    if ($("adminNavUserCount")) $("adminNavUserCount").textContent = ov.users?.total ?? 0;
+    if ($("adminNavRoleCount")) $("adminNavRoleCount").textContent = ov.roles?.total ?? 0;
+
+    // Recent activities stream
+    renderRecentActivities(ov.recent_activities || []);
+
+    // Recent logins stream
+    renderRecentLogins(ov.recent_logins || []);
+  } catch (err) {
+    showAdminToast("Error loading overview: " + err.message, "error");
+  }
+}
+
+function renderRecentActivities(activities) {
+  const container = $("adminRecentActivitiesList");
+  if (!container) return;
+
+  if (!activities.length) {
+    container.innerHTML = `<div class="admin-empty-state">No recent administrative activities found.</div>`;
+    return;
+  }
+
+  container.innerHTML = activities
+    .map((act) => {
+      const timeStr = act.created_at ? new Date(act.created_at).toLocaleString() : "";
+      const user = act.username || "System";
+      const icon = act.action.startsWith("user") ? "👤" : act.action.startsWith("role") ? "🛡️" : act.action.startsWith("auth") ? "🔑" : "⚙️";
+      let detailDesc = "";
+      if (act.details && typeof act.details === "object") {
+        detailDesc = Object.entries(act.details)
+          .map(([k, v]) => `${k}: ${v}`)
+          .slice(0, 3)
+          .join(" · ");
+      }
+
+      return `
+        <div class="admin-activity-item">
+          <div class="admin-activity-icon">${icon}</div>
+          <div class="admin-activity-content">
+            <div class="admin-activity-header">
+              <span class="admin-activity-user">${escapeHtml(user)}</span>
+              <span class="admin-activity-time">${escapeHtml(timeStr)}</span>
+            </div>
+            <div class="admin-activity-desc">
+              <span class="role-badge role-user" style="font-size:10px;">${escapeHtml(act.action)}</span>
+              ${detailDesc ? `<span style="color:var(--text-muted);">${escapeHtml(detailDesc)}</span>` : ""}
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderRecentLogins(logins) {
+  const container = $("adminRecentLoginsList");
+  if (!container) return;
+
+  if (!logins.length) {
+    container.innerHTML = `<div class="admin-empty-state">No recent authentication logs found.</div>`;
+    return;
+  }
+
+  container.innerHTML = logins
+    .map((item) => {
+      const timeStr = item.created_at ? new Date(item.created_at).toLocaleString() : "";
+      const statusPill =
+        item.status === "success"
+          ? `<span class="metric-pill metric-pill-success">Success</span>`
+          : item.status === "failed"
+          ? `<span class="metric-pill metric-pill-amber" style="background:#fee2e2;color:#b91c1c;">Failed</span>`
+          : `<span class="metric-pill metric-pill-muted">Logout</span>`;
+
+      return `
+        <div class="admin-activity-item">
+          <div class="admin-activity-icon">${item.status === "success" ? "✓" : item.status === "failed" ? "✕" : "⎋"}</div>
+          <div class="admin-activity-content">
+            <div class="admin-activity-header">
+              <span class="admin-activity-user">${escapeHtml(item.username)}</span>
+              ${statusPill}
+            </div>
+            <div class="admin-activity-desc" style="display:flex; justify-content:space-between; margin-top:3px;">
+              <span>IP: ${escapeHtml(item.ip_address || "local")}</span>
+              <span class="admin-activity-time">${escapeHtml(timeStr)}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+// -----------------------------------------------------------------------------
+// Users Management Panel
+// -----------------------------------------------------------------------------
+
+async function loadAdminUsers(page = 1) {
+  adminUsersPage = page;
+  const tbody = $("adminUsersTableBody");
+  if (tbody) {
+    tbody.innerHTML = `<tr><td colspan="6" class="admin-table-loading"><span class="spinner-small"></span> Loading users…</td></tr>`;
+  }
+
+  const search = $("adminUserSearchInput") ? $("adminUserSearchInput").value.trim() : "";
+  const role = $("adminUserRoleFilter") ? $("adminUserRoleFilter").value : "";
+  const status = $("adminUserStatusFilter") ? $("adminUserStatusFilter").value : "";
+  const sortBy = $("adminUserSortBy") ? $("adminUserSortBy").value : "created_at";
+  const order = adminUserSortOrder || "desc";
+
+  const url = `/api/admin/users?page=${page}&limit=10&sort_by=${encodeURIComponent(sortBy)}&order=${encodeURIComponent(order)}` +
+    (search ? `&search=${encodeURIComponent(search)}` : "") +
+    (role ? `&role=${encodeURIComponent(role)}` : "") +
+    (status ? `&status=${encodeURIComponent(status)}` : "");
+
+  try {
+    const res = await authFetch(url);
+    if (!res.ok) throw new Error("Failed to load users list");
+    const data = await res.json();
+    adminUsersCache = data.users || [];
+    adminUsersTotalPages = data.total_pages || 1;
+
+    // Populate role filter dropdown if empty
+    populateRoleFilterOptions();
+
+    renderUsersTable(data);
+  } catch (err) {
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="6" class="admin-empty-state" style="color:var(--danger);">Error: ${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+}
+
+function renderUsersTable(data) {
+  const tbody = $("adminUsersTableBody");
+  if (!tbody) return;
+
+  const users = data.users || [];
+  if (!users.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="admin-empty-state">No users match the search/filter criteria.</td></tr>`;
+    updateUserPagination(0, 0, 0, 1, 1);
+    return;
+  }
+
+  const startIdx = (data.page - 1) * data.limit + 1;
+  const endIdx = Math.min(data.page * data.limit, data.total);
+  updateUserPagination(startIdx, endIdx, data.total, data.page, data.total_pages);
+
+  tbody.innerHTML = users
+    .map((u) => {
+      const isSelf = currentUser && currentUser.id === u.id;
+      const initial = (u.username || "U").charAt(0).toUpperCase();
+      const lastLogin = u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never";
+      const createdAt = u.created_at ? new Date(u.created_at).toLocaleDateString() : "";
+
+      const rolesHtml = (u.roles || [])
+        .map((r) => {
+          let badgeClass = "role-custom";
+          if (r.name === "Super Admin") badgeClass = "role-super-admin";
+          else if (r.name === "Admin") badgeClass = "role-admin";
+          else if (r.name === "Manager") badgeClass = "role-manager";
+          else if (r.name === "User") badgeClass = "role-user";
+          else if (r.name === "Viewer") badgeClass = "role-viewer";
+          return `<span class="role-badge ${badgeClass}">${escapeHtml(r.name)}</span>`;
+        })
+        .join("");
+
+      const statusHtml = u.is_active
+        ? `<span class="status-dot-active">Active</span>`
+        : `<span class="status-dot-inactive">Inactive</span>`;
+
+      return `
+        <tr>
+          <td>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="user-avatar-icon" style="width:24px;height:24px;font-size:11px;">${initial}</span>
+              <div>
+                <strong>${escapeHtml(u.username)}</strong>
+                ${isSelf ? `<span class="metric-pill metric-pill-primary" style="margin-left:4px;font-size:9.5px;">You</span>` : ""}
+              </div>
+            </div>
+          </td>
+          <td>${rolesHtml || '<span style="color:var(--text-subtle);">None</span>'}</td>
+          <td>${statusHtml}</td>
+          <td style="font-size:11.5px;color:var(--text-muted);">${escapeHtml(lastLogin)}</td>
+          <td style="font-size:11.5px;color:var(--text-muted);">${escapeHtml(createdAt)}</td>
+          <td>
+            <div class="admin-action-btn-group">
+              <button type="button" class="admin-btn-table-action" onclick="openEditUserModal(${u.id})" title="Edit user details & roles">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                <span>Edit</span>
+              </button>
+
+              <button type="button" class="admin-btn-table-action" onclick="openPasswordResetModal(${u.id}, '${escapeHtml(u.username)}')" title="Reset password">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <span>Reset PW</span>
+              </button>
+
+              <button type="button" class="admin-btn-table-action" 
+                ${isSelf ? "disabled title='You cannot deactivate your own account'" : ""}
+                onclick="handleToggleUserStatus(${u.id}, ${u.is_active ? "false" : "true"}, '${escapeHtml(u.username)}')">
+                <span>${u.is_active ? "Deactivate" : "Activate"}</span>
+              </button>
+
+              <button type="button" class="admin-btn-table-action admin-btn-table-danger" 
+                ${isSelf ? "disabled title='You cannot delete your own account'" : ""}
+                onclick="handleDeleteUser(${u.id}, '${escapeHtml(u.username)}')">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span>Delete</span>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function updateUserPagination(start, end, total, page, totalPages) {
+  const infoEl = $("adminUserPaginationInfo");
+  if (infoEl) infoEl.textContent = `Showing ${start}-${end} of ${total} users`;
+
+  const prevBtn = $("adminUserPrevPageBtn");
+  const nextBtn = $("adminUserNextPageBtn");
+  if (prevBtn) prevBtn.disabled = page <= 1;
+  if (nextBtn) nextBtn.disabled = page >= totalPages;
+
+  const numbersEl = $("adminUserPageNumbers");
+  if (numbersEl) {
+    let html = "";
+    for (let p = 1; p <= totalPages; p++) {
+      html += `<button type="button" class="admin-page-num-btn ${p === page ? "active" : ""}" onclick="loadAdminUsers(${p})">${p}</button>`;
+    }
+    numbersEl.innerHTML = html;
+  }
+}
+
+async function populateRoleFilterOptions() {
+  const select = $("adminUserRoleFilter");
+  if (!select) return;
+  if (select.children.length > 1) return;
+
+  if (!adminRolesCache.length) {
+    try {
+      const res = await authFetch("/api/admin/roles");
+      if (res.ok) {
+        const d = await res.json();
+        adminRolesCache = d.roles || [];
+      }
+    } catch (e) {}
+  }
+
+  adminRolesCache.forEach((r) => {
+    const opt = document.createElement("option");
+    opt.value = r.name;
+    opt.textContent = r.name;
+    select.appendChild(opt);
+  });
+}
+
+function openCreateUserModal() {
+  const modal = $("adminUserModal");
+  if (!modal) return;
+
+  $("adminUserModalTitle").textContent = "Create New User";
+  $("adminUserModalUserId").value = "";
+  $("adminUserModalUsername").value = "";
+  $("adminUserModalUsername").disabled = false;
+  $("adminUserModalPasswordGroup").style.display = "block";
+  $("adminUserModalPassword").required = true;
+  $("adminUserModalPassword").value = "";
+  $("adminUserModalActiveSwitch").checked = true;
+  $("saveAdminUserModalBtnText").textContent = "Create User";
+  $("adminUserModalError").style.display = "none";
+
+  renderUserRolesCheckboxes([]);
+  modal.showModal();
+}
+
+function openEditUserModal(userId) {
+  const user = adminUsersCache.find((u) => u.id === userId);
+  if (!user) return;
+
+  const modal = $("adminUserModal");
+  if (!modal) return;
+
+  $("adminUserModalTitle").textContent = `Edit User: ${user.username}`;
+  $("adminUserModalUserId").value = user.id;
+  $("adminUserModalUsername").value = user.username;
+  $("adminUserModalUsername").disabled = false;
+  // In edit mode, password is not required (use reset password button)
+  $("adminUserModalPasswordGroup").style.display = "none";
+  $("adminUserModalPassword").required = false;
+  $("adminUserModalActiveSwitch").checked = !!user.is_active;
+  $("saveAdminUserModalBtnText").textContent = "Save Changes";
+  $("adminUserModalError").style.display = "none";
+
+  const assignedRoleIds = (user.roles || []).map((r) => r.id);
+  renderUserRolesCheckboxes(assignedRoleIds);
+  modal.showModal();
+}
+
+async function renderUserRolesCheckboxes(assignedRoleIds = []) {
+  const container = $("adminUserModalRolesList");
+  if (!container) return;
+
+  if (!adminRolesCache.length) {
+    try {
+      const res = await authFetch("/api/admin/roles");
+      if (res.ok) {
+        const d = await res.json();
+        adminRolesCache = d.roles || [];
+      }
+    } catch (e) {}
+  }
+
+  container.innerHTML = adminRolesCache
+    .map((role) => {
+      const checked = assignedRoleIds.includes(role.id) ? "checked" : "";
+      return `
+        <label class="admin-checkbox-label">
+          <input type="checkbox" name="userRole" value="${role.id}" ${checked}>
+          <span>${escapeHtml(role.name)}</span>
+        </label>
+      `;
+    })
+    .join("");
+}
+
+async function handleUserFormSubmit(e) {
+  e.preventDefault();
+  const userId = $("adminUserModalUserId").value;
+  const username = $("adminUserModalUsername").value.trim();
+  const isCreate = !userId;
+  const password = $("adminUserModalPassword").value;
+  const isActive = $("adminUserModalActiveSwitch").checked;
+
+  const roleCheckboxes = document.querySelectorAll('input[name="userRole"]:checked');
+  const roleIds = Array.from(roleCheckboxes).map((cb) => parseInt(cb.value, 10));
+
+  const errorEl = $("adminUserModalError");
+  errorEl.style.display = "none";
+
+  try {
+    let res;
+    if (isCreate) {
+      res = await authFetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username,
+          password,
+          role_ids: roleIds,
+          is_active: isActive,
+        }),
+      });
+    } else {
+      res = await authFetch(`/api/admin/users/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username,
+          role_ids: roleIds,
+          is_active: isActive,
+        }),
+      });
+    }
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to save user");
+
+    $("adminUserModal").close();
+    showAdminToast(isCreate ? "User successfully created!" : "User updated successfully!");
+    loadAdminUsers(adminUsersPage);
+    loadAdminOverview();
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.style.display = "block";
+  }
+}
+
+function openPasswordResetModal(userId, username) {
+  const modal = $("adminPasswordModal");
+  if (!modal) return;
+  $("adminPasswordUserId").value = userId;
+  $("adminPasswordUsernameText").textContent = username;
+  $("adminNewPasswordInput").value = "";
+  $("adminPasswordModalError").style.display = "none";
+  modal.showModal();
+}
+
+async function handlePasswordResetSubmit(e) {
+  e.preventDefault();
+  const userId = $("adminPasswordUserId").value;
+  const newPassword = $("adminNewPasswordInput").value;
+  const errorEl = $("adminPasswordModalError");
+  errorEl.style.display = "none";
+
+  try {
+    const res = await authFetch(`/api/admin/users/${userId}/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_password: newPassword }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Password reset failed");
+
+    $("adminPasswordModal").close();
+    showAdminToast("Password reset successfully! Active user sessions cleared.");
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.style.display = "block";
+  }
+}
+
+async function handleToggleUserStatus(userId, newActive, username) {
+  const actionText = newActive ? "activate" : "deactivate";
+  const confirmed = await showConfirmPopup({
+    title: `${newActive ? "Activate" : "Deactivate"} User`,
+    message: `Are you sure you want to ${actionText} user '${username}'?\n\n${
+      newActive ? "The user will be able to log in." : "Any active sessions will be terminated immediately."
+    }`,
+    confirmText: newActive ? "Activate Account" : "Deactivate Account",
+    confirmVariant: newActive ? "primary" : "warning",
+  });
+  if (!confirmed) return;
+
+  try {
+    const res = await authFetch(`/api/admin/users/${userId}/status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_active: newActive }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Status update failed");
+
+    showAdminToast(data.message || `User account ${actionText}d.`);
+    loadAdminUsers(adminUsersPage);
+    loadAdminOverview();
+  } catch (err) {
+    showAdminToast(err.message, "error");
+  }
+}
+
+async function handleDeleteUser(userId, username) {
+  const confirmed = await showConfirmPopup({
+    title: "Delete User Account",
+    message: `Are you sure you want to permanently delete user '${username}'?\n\nThis will remove all associated user sessions, roles, and overrides.`,
+    confirmText: "Delete Account",
+    confirmVariant: "danger",
+  });
+  if (!confirmed) return;
+
+  try {
+    const res = await authFetch(`/api/admin/users/${userId}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to delete user");
+
+    showAdminToast(`User '${username}' deleted successfully.`);
+    loadAdminUsers(adminUsersPage);
+    loadAdminOverview();
+  } catch (err) {
+    showAdminToast(err.message, "error");
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Role Management Panel
+// -----------------------------------------------------------------------------
+
+async function loadAdminRoles() {
+  const tbody = $("adminRolesTableBody");
+  if (tbody) {
+    tbody.innerHTML = `<tr><td colspan="6" class="admin-table-loading"><span class="spinner-small"></span> Loading roles…</td></tr>`;
+  }
+
+  const search = $("adminRoleSearchInput") ? $("adminRoleSearchInput").value.trim() : "";
+  const url = "/api/admin/roles" + (search ? `?search=${encodeURIComponent(search)}` : "");
+
+  try {
+    const res = await authFetch(url);
+    if (!res.ok) throw new Error("Failed to load roles");
+    const data = await res.json();
+    adminRolesCache = data.roles || [];
+    renderRolesTable(adminRolesCache);
+  } catch (err) {
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="6" class="admin-empty-state" style="color:var(--danger);">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+}
+
+function renderRolesTable(roles) {
+  const tbody = $("adminRolesTableBody");
+  if (!tbody) return;
+
+  if (!roles.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="admin-empty-state">No roles found.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = roles
+    .map((r) => {
+      const isSystem = r.is_system;
+      const typeBadge = isSystem
+        ? `<span class="metric-pill metric-pill-primary">System</span>`
+        : `<span class="metric-pill metric-pill-emerald">Custom</span>`;
+
+      return `
+        <tr>
+          <td>
+            <strong>${escapeHtml(r.name)}</strong>
+          </td>
+          <td>${typeBadge}</td>
+          <td style="color:var(--text-muted);">${escapeHtml(r.description || "—")}</td>
+          <td><span class="role-badge role-user">${r.user_count} user(s)</span></td>
+          <td><span class="metric-pill metric-pill-info">${r.permission_count} permissions</span></td>
+          <td>
+            <div class="admin-action-btn-group">
+              <button type="button" class="admin-btn-table-action" onclick="openEditRoleModal(${r.id})" title="Edit permissions & info">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                <span>Edit</span>
+              </button>
+
+              <button type="button" class="admin-btn-table-action admin-btn-table-danger"
+                ${isSystem ? "disabled title='System roles are protected and cannot be deleted'" : ""}
+                onclick="handleDeleteRole(${r.id}, '${escapeHtml(r.name)}')">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span>Delete</span>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+async function ensurePermissionsLoaded() {
+  if (!adminPermissionsCache.permissions.length) {
+    try {
+      const res = await authFetch("/api/admin/permissions");
+      if (res.ok) {
+        adminPermissionsCache = await res.json();
+      }
+    } catch (e) {}
+  }
+}
+
+async function openCreateRoleModal() {
+  const modal = $("adminRoleModal");
+  if (!modal) return;
+  await ensurePermissionsLoaded();
+
+  $("adminRoleModalTitle").textContent = "Create Custom Role";
+  $("adminRoleModalRoleId").value = "";
+  $("adminRoleModalName").value = "";
+  $("adminRoleModalName").disabled = false;
+  $("adminRoleModalDesc").value = "";
+  $("saveAdminRoleModalBtnText").textContent = "Create Role";
+  $("adminRoleModalError").style.display = "none";
+
+  renderRolePermissionsChecklist([]);
+  modal.showModal();
+}
+
+async function openEditRoleModal(roleId) {
+  const modal = $("adminRoleModal");
+  if (!modal) return;
+  await ensurePermissionsLoaded();
+
+  try {
+    const res = await authFetch(`/api/admin/roles/${roleId}`);
+    if (!res.ok) throw new Error("Failed to load role details");
+    const data = await res.json();
+    const role = data.role;
+
+    $("adminRoleModalTitle").textContent = `Edit Role: ${role.name}`;
+    $("adminRoleModalRoleId").value = role.id;
+    $("adminRoleModalName").value = role.name;
+    $("adminRoleModalName").disabled = role.name === "Super Admin";
+    $("adminRoleModalDesc").value = role.description || "";
+    $("saveAdminRoleModalBtnText").textContent = "Save Role";
+    $("adminRoleModalError").style.display = "none";
+
+    renderRolePermissionsChecklist(role.permission_ids || []);
+    modal.showModal();
+  } catch (err) {
+    showAdminToast(err.message, "error");
+  }
+}
+
+function renderRolePermissionsChecklist(assignedPermissionIds = []) {
+  const container = $("adminRolePermissionsChecklist");
+  if (!container) return;
+
+  const grouped = adminPermissionsCache.grouped || {};
+  let html = "";
+
+  for (const [moduleName, perms] of Object.entries(grouped)) {
+    const itemsHtml = perms
+      .map((p) => {
+        const checked = assignedPermissionIds.includes(p.id) ? "checked" : "";
+        return `
+          <label class="admin-checkbox-label">
+            <input type="checkbox" name="rolePermission" value="${p.id}" ${checked}>
+            <span><strong>${escapeHtml(p.action)}</strong> (${escapeHtml(p.name)})</span>
+          </label>
+        `;
+      })
+      .join("");
+
+    html += `
+      <div class="admin-role-perm-group">
+        <div class="admin-role-perm-group-title">Module: ${escapeHtml(moduleName)}</div>
+        <div class="admin-role-perm-items-grid">${itemsHtml}</div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+}
+
+async function handleRoleFormSubmit(e) {
+  e.preventDefault();
+  const roleId = $("adminRoleModalRoleId").value;
+  const isCreate = !roleId;
+  const name = $("adminRoleModalName").value.trim();
+  const description = $("adminRoleModalDesc").value.trim();
+
+  const checkedBoxes = document.querySelectorAll('input[name="rolePermission"]:checked');
+  const permissionIds = Array.from(checkedBoxes).map((cb) => parseInt(cb.value, 10));
+
+  const errorEl = $("adminRoleModalError");
+  errorEl.style.display = "none";
+
+  try {
+    let res;
+    if (isCreate) {
+      res = await authFetch("/api/admin/roles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, description, permission_ids: permissionIds }),
+      });
+    } else {
+      res = await authFetch(`/api/admin/roles/${roleId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, description, permission_ids: permissionIds }),
+      });
+    }
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to save role");
+
+    $("adminRoleModal").close();
+    showAdminToast(isCreate ? "Role created successfully!" : "Role updated successfully!");
+    loadAdminRoles();
+    loadAdminOverview();
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.style.display = "block";
+  }
+}
+
+async function handleDeleteRole(roleId, roleName) {
+  const confirmed = await showConfirmPopup({
+    title: "Delete Role",
+    message: `Are you sure you want to permanently delete custom role '${roleName}'?`,
+    confirmText: "Delete Role",
+    confirmVariant: "danger",
+  });
+  if (!confirmed) return;
+
+  try {
+    const res = await authFetch(`/api/admin/roles/${roleId}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to delete role");
+
+    showAdminToast(`Role '${roleName}' successfully deleted.`);
+    loadAdminRoles();
+    loadAdminOverview();
+  } catch (err) {
+    showAdminToast(err.message, "error");
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Permissions & ACL Panel
+// -----------------------------------------------------------------------------
+
+async function loadAdminPermissions() {
+  await ensurePermissionsLoaded();
+  renderPermissionsRegistryView();
+  populateUserAclSelector();
+}
+
+function renderPermissionsRegistryView() {
+  const container = $("adminPermissionsGrid");
+  if (!container) return;
+
+  const grouped = adminPermissionsCache.grouped || {};
+  let html = "";
+
+  for (const [moduleName, perms] of Object.entries(grouped)) {
+    const itemsHtml = perms
+      .map(
+        (p) => `
+        <div class="admin-perm-item">
+          <div class="admin-perm-item-info">
+            <span class="admin-perm-name">${escapeHtml(p.name)}</span>
+            <span class="admin-perm-desc">${escapeHtml(p.description)}</span>
+          </div>
+          <span class="role-badge role-user" style="font-size:10px;">${escapeHtml(p.action)}</span>
+        </div>
+      `
+      )
+      .join("");
+
+    html += `
+      <div class="admin-perm-module-card">
+        <div class="admin-perm-module-header">
+          <span class="admin-perm-module-title">${escapeHtml(moduleName)}</span>
+          <span class="metric-pill metric-pill-primary">${perms.length} actions</span>
+        </div>
+        <div class="admin-perm-list">${itemsHtml}</div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+}
+
+async function populateUserAclSelector() {
+  const select = $("adminPermUserSelector");
+  if (!select) return;
+
+  try {
+    const res = await authFetch("/api/admin/users?limit=100");
+    if (!res.ok) return;
+    const d = await res.json();
+    const users = d.users || [];
+
+    select.innerHTML = `<option value="">Select a user account…</option>` +
+      users
+        .map((u) => `<option value="${u.id}">${escapeHtml(u.username)} (${(u.role_names || []).join(", ") || "No role"})</option>`)
+        .join("");
+  } catch (e) {}
+}
+
+async function handleAclUserSelected(userId) {
+  adminSelectedAclUserId = userId;
+  const emptyState = $("adminUserAclEmptyState");
+  const tableWrap = $("adminUserAclTableWrap");
+  const summaryEl = $("adminPermUserRolesSummary");
+
+  if (!userId) {
+    if (emptyState) emptyState.style.display = "block";
+    if (tableWrap) tableWrap.style.display = "none";
+    if (summaryEl) summaryEl.textContent = "No user selected";
+    return;
+  }
+
+  if (emptyState) emptyState.style.display = "none";
+  if (tableWrap) tableWrap.style.display = "block";
+
+  const tbody = $("adminUserAclTableBody");
+  if (tbody) {
+    tbody.innerHTML = `<tr><td colspan="5" class="admin-table-loading"><span class="spinner-small"></span> Inspecting user ACL…</td></tr>`;
+  }
+
+  try {
+    const res = await authFetch(`/api/admin/users/${userId}/permissions`);
+    if (!res.ok) throw new Error("Failed to load user permissions breakdown");
+    const data = await res.json();
+    const perms = data.permissions || [];
+
+    if (summaryEl) {
+      const activeCount = perms.filter((p) => p.effective).length;
+      summaryEl.textContent = `${activeCount} / ${perms.length} Permissions Active`;
+    }
+
+    renderUserAclTable(perms);
+  } catch (err) {
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="5" class="admin-empty-state" style="color:var(--danger);">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+}
+
+function renderUserAclTable(perms) {
+  const tbody = $("adminUserAclTableBody");
+  if (!tbody) return;
+
+  tbody.innerHTML = perms
+    .map((p) => {
+      const statusBadge = p.effective
+        ? `<span class="metric-pill metric-pill-success">Allowed</span>`
+        : `<span class="metric-pill metric-pill-muted">Denied</span>`;
+
+      let sourceBadge = `<span style="font-size:11px;color:var(--text-muted);">${escapeHtml(p.source)}</span>`;
+      if (p.override === 1) {
+        sourceBadge = `<span class="metric-pill metric-pill-emerald">Direct Grant (Override)</span>`;
+      } else if (p.override === 0) {
+        sourceBadge = `<span class="metric-pill metric-pill-amber" style="background:#fee2e2;color:#b91c1c;">Direct Deny (Override)</span>`;
+      }
+
+      return `
+        <tr>
+          <td>
+            <code style="font-size:11px;font-weight:600;">${escapeHtml(p.name)}</code>
+            <div style="font-size:10.5px;color:var(--text-muted);">${escapeHtml(p.description)}</div>
+          </td>
+          <td><span class="role-badge role-user" style="font-size:10px;">${escapeHtml(p.action)}</span></td>
+          <td>${statusBadge}</td>
+          <td>${sourceBadge}</td>
+          <td>
+            <div class="admin-action-btn-group">
+              <button type="button" class="admin-btn-table-action" onclick="applyAclOverride(${p.id}, 1)" title="Grant permission explicitly to this user">
+                <span>Allow</span>
+              </button>
+              <button type="button" class="admin-btn-table-action admin-btn-table-danger" onclick="applyAclOverride(${p.id}, 0)" title="Explicitly deny/revoke permission for this user">
+                <span>Deny</span>
+              </button>
+              ${
+                p.override !== null
+                  ? `<button type="button" class="admin-btn-table-action" onclick="clearAclOverride(${p.id})" title="Remove override and revert to role default"><span>Reset</span></button>`
+                  : ""
+              }
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+async function applyAclOverride(permissionId, granted) {
+  if (!adminSelectedAclUserId) return;
+  try {
+    const res = await authFetch(`/api/admin/users/${adminSelectedAclUserId}/permissions`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        overrides: [{ permission_id: permissionId, granted: granted }],
+      }),
+    });
+    if (!res.ok) throw new Error("Failed to apply permission override");
+    showAdminToast(granted === 1 ? "Permission override granted!" : "Permission override denied!");
+    handleAclUserSelected(adminSelectedAclUserId);
+  } catch (err) {
+    showAdminToast(err.message, "error");
+  }
+}
+
+async function clearAclOverride(permissionId) {
+  if (!adminSelectedAclUserId) return;
+  try {
+    const res = await authFetch(`/api/admin/users/${adminSelectedAclUserId}/permissions/${permissionId}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to clear override");
+    showAdminToast("Permission override cleared. Reverted to role assignment.");
+    handleAclUserSelected(adminSelectedAclUserId);
+  } catch (err) {
+    showAdminToast(err.message, "error");
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Audit Logs Panel (Read-Only)
+// -----------------------------------------------------------------------------
+
+async function loadAdminAuditLogs(page = 1) {
+  adminAuditPage = page;
+  const tbody = $("adminAuditTableBody");
+  if (tbody) {
+    tbody.innerHTML = `<tr><td colspan="6" class="admin-table-loading"><span class="spinner-small"></span> Querying audit trail…</td></tr>`;
+  }
+
+  const search = $("adminAuditSearchInput") ? $("adminAuditSearchInput").value.trim() : "";
+  const resource = $("adminAuditResourceFilter") ? $("adminAuditResourceFilter").value : "";
+  const action = $("adminAuditActionFilter") ? $("adminAuditActionFilter").value : "";
+
+  const url = `/api/admin/audit-logs?page=${page}&limit=20` +
+    (search ? `&search=${encodeURIComponent(search)}` : "") +
+    (resource ? `&resource=${encodeURIComponent(resource)}` : "") +
+    (action ? `&action=${encodeURIComponent(action)}` : "");
+
+  try {
+    const res = await authFetch(url);
+    if (!res.ok) throw new Error("Failed to query audit trail");
+    const data = await res.json();
+    adminAuditTotalPages = data.total_pages || 1;
+    renderAuditTable(data);
+  } catch (err) {
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="6" class="admin-empty-state" style="color:var(--danger);">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+}
+
+function renderAuditTable(data) {
+  const tbody = $("adminAuditTableBody");
+  if (!tbody) return;
+
+  const logs = data.logs || [];
+  if (!logs.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="admin-empty-state">No audit log records match the filters.</td></tr>`;
+    updateAuditPagination(0, 0, 0, 1, 1);
+    return;
+  }
+
+  const startIdx = (data.page - 1) * data.limit + 1;
+  const endIdx = Math.min(data.page * data.limit, data.total);
+  updateAuditPagination(startIdx, endIdx, data.total, data.page, data.total_pages);
+
+  tbody.innerHTML = logs
+    .map((l) => {
+      const timeStr = l.created_at ? new Date(l.created_at).toLocaleString() : "";
+      const jsonStr = JSON.stringify(l.details || {}, null, 2);
+
+      let actionBadgeClass = "role-user";
+      if (l.action.startsWith("auth.login_failed") || l.action.endsWith("delete")) actionBadgeClass = "role-viewer";
+      else if (l.action.startsWith("auth.login")) actionBadgeClass = "role-custom";
+      else if (l.action.startsWith("role")) actionBadgeClass = "role-manager";
+
+      return `
+        <tr>
+          <td style="font-size:11.5px;color:var(--text-muted);white-space:nowrap;">${escapeHtml(timeStr)}</td>
+          <td><strong>${escapeHtml(l.username || "System")}</strong></td>
+          <td><span class="role-badge ${actionBadgeClass}" style="font-size:10.5px;">${escapeHtml(l.action)}</span></td>
+          <td><span style="font-size:11px;font-family:var(--font-mono);">${escapeHtml(l.resource)}</span></td>
+          <td style="font-size:11px;color:var(--text-subtle);">${escapeHtml(l.ip_address || "local")}</td>
+          <td>
+            <div class="admin-action-btn-group">
+              <button type="button" class="admin-btn-table-action" onclick='viewAuditDetail(${JSON.stringify(l).replace(/'/g, "&#39;")})'>
+                <span>View Details</span>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function updateAuditPagination(start, end, total, page, totalPages) {
+  const infoEl = $("adminAuditPaginationInfo");
+  if (infoEl) infoEl.textContent = `Showing ${start}-${end} of ${total} logs`;
+
+  const prevBtn = $("adminAuditPrevPageBtn");
+  const nextBtn = $("adminAuditNextPageBtn");
+  if (prevBtn) prevBtn.disabled = page <= 1;
+  if (nextBtn) nextBtn.disabled = page >= totalPages;
+
+  const numbersEl = $("adminAuditPageNumbers");
+  if (numbersEl) {
+    let html = "";
+    const maxShow = 5;
+    const startP = Math.max(1, page - 2);
+    const endP = Math.min(totalPages, startP + maxShow - 1);
+    for (let p = startP; p <= endP; p++) {
+      html += `<button type="button" class="admin-page-num-btn ${p === page ? "active" : ""}" onclick="loadAdminAuditLogs(${p})">${p}</button>`;
+    }
+    numbersEl.innerHTML = html;
+  }
+}
+
+function viewAuditDetail(logItem) {
+  const modal = $("adminAuditDetailModal");
+  if (!modal) return;
+
+  $("auditDetailAction").textContent = logItem.action;
+  $("auditDetailUser").textContent = logItem.username || "System";
+  $("auditDetailResource").textContent = logItem.resource;
+  $("auditDetailIp").textContent = logItem.ip_address || "local";
+  $("auditDetailTimestamp").textContent = logItem.created_at;
+  $("auditDetailJson").textContent = JSON.stringify(logItem.details || {}, null, 2);
+
+  modal.showModal();
+}
+
+// -----------------------------------------------------------------------------
+// System Settings Panel
+// -----------------------------------------------------------------------------
+
+async function loadAdminSettings() {
+  await ensurePermissionsLoaded();
+  populateDefaultRoleOptions();
+
+  try {
+    const res = await authFetch("/api/admin/settings");
+    if (!res.ok) throw new Error("Failed to load settings");
+    const data = await res.json();
+    const settings = data.settings || {};
+
+    if ($("setting_app_name") && settings.app_name) $("setting_app_name").value = settings.app_name.value;
+    if ($("setting_allow_registration") && settings.allow_registration) {
+      $("setting_allow_registration").checked = settings.allow_registration.value === "true";
+    }
+    if ($("setting_default_role") && settings.default_role) $("setting_default_role").value = settings.default_role.value;
+    if ($("setting_session_timeout_days") && settings.session_timeout_days) {
+      $("setting_session_timeout_days").value = settings.session_timeout_days.value;
+    }
+    if ($("setting_password_min_length") && settings.password_min_length) {
+      $("setting_password_min_length").value = settings.password_min_length.value;
+    }
+    if ($("setting_max_file_upload_mb") && settings.max_file_upload_mb) {
+      $("setting_max_file_upload_mb").value = settings.max_file_upload_mb.value;
+    }
+    if ($("setting_maintenance_mode") && settings.maintenance_mode) {
+      $("setting_maintenance_mode").checked = settings.maintenance_mode.value === "true";
+    }
+  } catch (err) {
+    showAdminToast(err.message, "error");
+  }
+}
+
+function populateDefaultRoleOptions() {
+  const select = $("setting_default_role");
+  if (!select) return;
+
+  const defaultRoles = ["User", "Viewer", "Manager", "Admin"];
+  select.innerHTML = defaultRoles.map((r) => `<option value="${r}">${r}</option>`).join("");
+}
+
+async function handleSettingsFormSubmit(e) {
+  e.preventDefault();
+  const statusEl = $("adminSettingsSaveStatus");
+  const saveBtn = $("adminSaveSettingsBtn");
+  if (saveBtn) saveBtn.disabled = true;
+
+  const payload = {
+    settings: {
+      app_name: $("setting_app_name").value.trim(),
+      allow_registration: $("setting_allow_registration").checked ? "true" : "false",
+      default_role: $("setting_default_role").value,
+      session_timeout_days: $("setting_session_timeout_days").value,
+      password_min_length: $("setting_password_min_length").value,
+      max_file_upload_mb: $("setting_max_file_upload_mb").value,
+      maintenance_mode: $("setting_maintenance_mode").checked ? "true" : "false",
+    },
+  };
+
+  try {
+    const res = await authFetch("/api/admin/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to update settings");
+
+    showAdminToast("System settings updated successfully!");
+    if (statusEl) {
+      statusEl.textContent = "Settings saved.";
+      setTimeout(() => (statusEl.textContent = ""), 3000);
+    }
+  } catch (err) {
+    showAdminToast(err.message, "error");
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Admin Event Listeners & Binding Initialization
+// -----------------------------------------------------------------------------
+
+function initAdminDashboard() {
+  // Top header button & user popup trigger
+  const headerAdminBtn = $("headerAdminBtn");
+  if (headerAdminBtn) {
+    headerAdminBtn.addEventListener("click", () => showAdminDashboard("overview"));
+  }
+
+  const popupAdminBtn = $("popupAdminBtn");
+  if (popupAdminBtn) {
+    popupAdminBtn.addEventListener("click", () => {
+      closeProfilePopup();
+      showAdminDashboard("overview");
+    });
+  }
+
+  // Topbar and sidebar exit buttons
+  const exitTopBtn = $("adminTopbarExitBtn");
+  if (exitTopBtn) exitTopBtn.addEventListener("click", () => hideAdminDashboard());
+
+  const returnChatBtn = $("adminReturnToChatBtn");
+  if (returnChatBtn) returnChatBtn.addEventListener("click", () => hideAdminDashboard());
+
+  // Theme toggle inside admin topbar
+  const adminThemeBtn = $("adminThemeToggleBtn");
+  if (adminThemeBtn) {
+    adminThemeBtn.addEventListener("click", toggleTheme);
+  }
+
+  // Sidebar collapse & mobile menu
+  const collapseBtn = $("adminSidebarCollapseBtn");
+  const sidebar = $("adminSidebar");
+  const adminBrand = document.querySelector(".admin-sidebar-brand");
+
+  function updateAdminSidebarCollapseState() {
+    if (!collapseBtn || !sidebar) return;
+    const isCollapsed = sidebar.classList.contains("collapsed");
+    collapseBtn.setAttribute("title", isCollapsed ? "Expand administration sidebar" : "Collapse administration sidebar");
+    collapseBtn.setAttribute("aria-label", isCollapsed ? "Expand administration sidebar" : "Collapse administration sidebar");
+    if (adminBrand) {
+      adminBrand.setAttribute("title", isCollapsed ? "Click to expand sidebar" : "");
+    }
+  }
+
+  if (collapseBtn && sidebar) {
+    collapseBtn.addEventListener("click", () => {
+      sidebar.classList.toggle("collapsed");
+      updateAdminSidebarCollapseState();
+    });
+  }
+
+  if (adminBrand && sidebar) {
+    adminBrand.addEventListener("click", () => {
+      if (sidebar.classList.contains("collapsed")) {
+        sidebar.classList.remove("collapsed");
+        updateAdminSidebarCollapseState();
+      }
+    });
+  }
+
+  const mobileBtn = $("adminMobileMenuBtn");
+  if (mobileBtn && sidebar) {
+    mobileBtn.addEventListener("click", () => {
+      sidebar.classList.toggle("mobile-open");
+    });
+  }
+
+  // Nav menu clicks
+  const navBtns = document.querySelectorAll(".admin-nav-item");
+  navBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (sidebar) sidebar.classList.remove("mobile-open");
+      switchAdminPanel(btn.dataset.panel);
+    });
+  });
+
+  // URL Hash change detection
+  window.addEventListener("hashchange", () => {
+    if (window.location.hash.startsWith("#admin")) {
+      const parts = window.location.hash.split("/");
+      const p = parts[1] || "overview";
+      showAdminDashboard(p);
+    }
+  });
+
+  // Overview quick actions
+  if ($("adminQuickAddUserBtn")) {
+    $("adminQuickAddUserBtn").addEventListener("click", () => {
+      switchAdminPanel("users");
+      openCreateUserModal();
+    });
+  }
+  if ($("adminQuickAddRoleBtn")) {
+    $("adminQuickAddRoleBtn").addEventListener("click", () => {
+      switchAdminPanel("roles");
+      openCreateRoleModal();
+    });
+  }
+  if ($("adminQuickViewAuditBtn")) {
+    $("adminQuickViewAuditBtn").addEventListener("click", () => switchAdminPanel("audit-logs"));
+  }
+  if ($("adminQuickSettingsBtn")) {
+    $("adminQuickSettingsBtn").addEventListener("click", () => switchAdminPanel("settings"));
+  }
+  if ($("adminRefreshOverviewBtn")) {
+    $("adminRefreshOverviewBtn").addEventListener("click", () => loadAdminOverview());
+  }
+
+  // User panel triggers
+  if ($("adminOpenCreateUserModalBtn")) {
+    $("adminOpenCreateUserModalBtn").addEventListener("click", () => openCreateUserModal());
+  }
+
+  let userSearchTimer = null;
+  if ($("adminUserSearchInput")) {
+    $("adminUserSearchInput").addEventListener("input", () => {
+      clearTimeout(userSearchTimer);
+      userSearchTimer = setTimeout(() => loadAdminUsers(1), 250);
+    });
+  }
+  if ($("adminUserRoleFilter")) $("adminUserRoleFilter").addEventListener("change", () => loadAdminUsers(1));
+  if ($("adminUserStatusFilter")) $("adminUserStatusFilter").addEventListener("change", () => loadAdminUsers(1));
+  if ($("adminUserSortBy")) $("adminUserSortBy").addEventListener("change", () => loadAdminUsers(1));
+  if ($("adminUserSortOrderBtn")) {
+    $("adminUserSortOrderBtn").addEventListener("click", () => {
+      adminUserSortOrder = adminUserSortOrder === "asc" ? "desc" : "asc";
+      loadAdminUsers(adminUsersPage);
+    });
+  }
+
+  if ($("adminUserPrevPageBtn")) {
+    $("adminUserPrevPageBtn").addEventListener("click", () => {
+      if (adminUsersPage > 1) loadAdminUsers(adminUsersPage - 1);
+    });
+  }
+  if ($("adminUserNextPageBtn")) {
+    $("adminUserNextPageBtn").addEventListener("click", () => {
+      if (adminUsersPage < adminUsersTotalPages) loadAdminUsers(adminUsersPage + 1);
+    });
+  }
+
+  // User modal form
+  if ($("adminUserForm")) $("adminUserForm").addEventListener("submit", handleUserFormSubmit);
+  if ($("closeAdminUserModalBtn")) $("closeAdminUserModalBtn").addEventListener("click", () => $("adminUserModal").close());
+  if ($("cancelAdminUserModalBtn")) $("cancelAdminUserModalBtn").addEventListener("click", () => $("adminUserModal").close());
+
+  // Password reset modal form
+  if ($("adminPasswordForm")) $("adminPasswordForm").addEventListener("submit", handlePasswordResetSubmit);
+  if ($("closeAdminPasswordModalBtn")) $("closeAdminPasswordModalBtn").addEventListener("click", () => $("adminPasswordModal").close());
+  if ($("cancelAdminPasswordBtn")) $("cancelAdminPasswordBtn").addEventListener("click", () => $("adminPasswordModal").close());
+
+  // Role panel triggers
+  if ($("adminOpenCreateRoleModalBtn")) {
+    $("adminOpenCreateRoleModalBtn").addEventListener("click", () => openCreateRoleModal());
+  }
+  let roleSearchTimer = null;
+  if ($("adminRoleSearchInput")) {
+    $("adminRoleSearchInput").addEventListener("input", () => {
+      clearTimeout(roleSearchTimer);
+      roleSearchTimer = setTimeout(() => loadAdminRoles(), 250);
+    });
+  }
+  if ($("adminRoleForm")) $("adminRoleForm").addEventListener("submit", handleRoleFormSubmit);
+  if ($("closeAdminRoleModalBtn")) $("closeAdminRoleModalBtn").addEventListener("click", () => $("adminRoleModal").close());
+  if ($("cancelAdminRoleModalBtn")) $("cancelAdminRoleModalBtn").addEventListener("click", () => $("adminRoleModal").close());
+
+  if ($("adminRoleSelectAllPermsBtn")) {
+    $("adminRoleSelectAllPermsBtn").addEventListener("click", () => {
+      document.querySelectorAll('input[name="rolePermission"]').forEach((cb) => (cb.checked = true));
+    });
+  }
+  if ($("adminRoleDeselectAllPermsBtn")) {
+    $("adminRoleDeselectAllPermsBtn").addEventListener("click", () => {
+      document.querySelectorAll('input[name="rolePermission"]').forEach((cb) => (cb.checked = false));
+    });
+  }
+
+  // Permissions subtabs
+  if ($("adminPermTabRegistryBtn")) {
+    $("adminPermTabRegistryBtn").addEventListener("click", () => {
+      $("adminPermTabRegistryBtn").classList.add("active");
+      $("adminPermTabOverridesBtn").classList.remove("active");
+      $("adminPermRegistryView").classList.add("active");
+      $("adminPermOverridesView").classList.remove("active");
+    });
+  }
+  if ($("adminPermTabOverridesBtn")) {
+    $("adminPermTabOverridesBtn").addEventListener("click", () => {
+      $("adminPermTabOverridesBtn").classList.add("active");
+      $("adminPermTabRegistryBtn").classList.remove("active");
+      $("adminPermOverridesView").classList.add("active");
+      $("adminPermRegistryView").classList.remove("active");
+    });
+  }
+  if ($("adminPermUserSelector")) {
+    $("adminPermUserSelector").addEventListener("change", (e) => {
+      handleAclUserSelected(e.target.value ? parseInt(e.target.value, 10) : null);
+    });
+  }
+
+  // Audit logs panel triggers
+  let auditSearchTimer = null;
+  if ($("adminAuditSearchInput")) {
+    $("adminAuditSearchInput").addEventListener("input", () => {
+      clearTimeout(auditSearchTimer);
+      auditSearchTimer = setTimeout(() => loadAdminAuditLogs(1), 250);
+    });
+  }
+  if ($("adminAuditResourceFilter")) $("adminAuditResourceFilter").addEventListener("change", () => loadAdminAuditLogs(1));
+  if ($("adminAuditActionFilter")) $("adminAuditActionFilter").addEventListener("change", () => loadAdminAuditLogs(1));
+
+  if ($("adminAuditPrevPageBtn")) {
+    $("adminAuditPrevPageBtn").addEventListener("click", () => {
+      if (adminAuditPage > 1) loadAdminAuditLogs(adminAuditPage - 1);
+    });
+  }
+  if ($("adminAuditNextPageBtn")) {
+    $("adminAuditNextPageBtn").addEventListener("click", () => {
+      if (adminAuditPage < adminAuditTotalPages) loadAdminAuditLogs(adminAuditPage + 1);
+    });
+  }
+
+  // Audit export triggers
+  if ($("adminExportAuditCsvBtn")) {
+    $("adminExportAuditCsvBtn").addEventListener("click", () => {
+      window.open("/api/admin/audit-logs/export?format=csv", "_blank");
+    });
+  }
+  if ($("adminExportAuditJsonBtn")) {
+    $("adminExportAuditJsonBtn").addEventListener("click", () => {
+      window.open("/api/admin/audit-logs/export?format=json", "_blank");
+    });
+  }
+  if ($("closeAdminAuditDetailModalBtn")) {
+    $("closeAdminAuditDetailModalBtn").addEventListener("click", () => $("adminAuditDetailModal").close());
+  }
+  if ($("doneAuditDetailModalBtn")) {
+    $("doneAuditDetailModalBtn").addEventListener("click", () => $("adminAuditDetailModal").close());
+  }
+  if ($("copyAuditDetailJsonBtn")) {
+    $("copyAuditDetailJsonBtn").addEventListener("click", () => {
+      const text = $("auditDetailJson").textContent;
+      navigator.clipboard.writeText(text).then(() => showAdminToast("Metadata copied to clipboard!"));
+    });
+  }
+
+  // Settings form
+  if ($("adminSettingsForm")) $("adminSettingsForm").addEventListener("submit", handleSettingsFormSubmit);
+}
+
+// Make functions globally accessible for inline onclick handlers in table rows
+window.openEditUserModal = openEditUserModal;
+window.openPasswordResetModal = openPasswordResetModal;
+window.handleToggleUserStatus = handleToggleUserStatus;
+window.handleDeleteUser = handleDeleteUser;
+window.openEditRoleModal = openEditRoleModal;
+window.handleDeleteRole = handleDeleteRole;
+window.loadAdminUsers = loadAdminUsers;
+window.loadAdminAuditLogs = loadAdminAuditLogs;
+window.applyAclOverride = applyAclOverride;
+window.clearAclOverride = clearAclOverride;
+window.viewAuditDetail = viewAuditDetail;
+window.showAdminDashboard = showAdminDashboard;
+window.hideAdminDashboard = hideAdminDashboard;
+
 // Delegate click on prompt starter chips
 document.addEventListener("click", (e) => {
   const chip = e.target.closest(".chip");
@@ -3717,15 +5538,25 @@ document.addEventListener("click", (e) => {
 
   initTheme();
   initPopupDialogs();
+  initUserProfileEvents();
   initVoiceDictation();
   initCitationDialog();
   initPreviewDialog();
   initExportDialog();
   initModelsDialog();
   initChatAttach();
+  initAdminDashboard();
   await checkAuthStatus();
   await loadWorkspaces();
   updateChatActionButtons();
+
+  // Route to admin if requested in URL hash or path
+  if ((window.location.hash.startsWith("#admin") || window.location.pathname.startsWith("/admin")) && currentUser && currentUser.is_admin) {
+    const parts = window.location.hash.split("/");
+    const p = parts[1] || "overview";
+    showAdminDashboard(p);
+  }
+
   await Promise.all([
     loadFiles(),
     loadHealth(),

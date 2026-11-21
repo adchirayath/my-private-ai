@@ -47,9 +47,22 @@ def init_sqlite_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL COLLATE NOCASE,
                 password_hash TEXT NOT NULL,
+                avatar TEXT DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Safe schema migration for existing databases without avatar column
+        cursor = conn.execute("PRAGMA table_info(users)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "avatar" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT NULL")
+        if "is_active" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+        if "updated_at" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN updated_at TIMESTAMP DEFAULT NULL")
+        if "last_login_at" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP DEFAULT NULL")
 
         # 2. Sessions table
         conn.execute("""
@@ -190,12 +203,183 @@ def init_sqlite_db() -> None:
             SELECT DISTINCT workspace, user_id FROM messages WHERE workspace != 'default'
         """)
 
+        # 7. Role-Based Access Control (RBAC) & ACL Architecture
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL COLLATE NOCASE,
+                description TEXT DEFAULT '',
+                is_system INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL COLLATE NOCASE,
+                resource TEXT NOT NULL COLLATE NOCASE,
+                action TEXT NOT NULL COLLATE NOCASE,
+                description TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_roles (
+                user_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, role_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS role_permissions (
+                role_id INTEGER NOT NULL,
+                permission_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (role_id, permission_id),
+                FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+                FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_permissions (
+                user_id INTEGER NOT NULL,
+                permission_id INTEGER NOT NULL,
+                granted INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, permission_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER DEFAULT NULL,
+                username TEXT DEFAULT '',
+                action TEXT NOT NULL,
+                resource TEXT NOT NULL,
+                details TEXT DEFAULT '{}',
+                ip_address TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # RBAC and Audit Indexes
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_roles_user ON user_roles(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_roles_role ON user_roles(role_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_role_perms_role ON role_permissions(role_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_role_perms_perm ON role_permissions(permission_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_perms_user ON user_permissions(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource)")
+
+        # Seed RBAC, Default Roles, Permissions, and Settings
+        _seed_rbac_and_settings(conn)
+
         conn.commit()
 
         # Seamless backfill for pre-existing ChromaDB chunks if FTS is empty
         _backfill_fts_and_documents_if_needed(conn, default_user_id=first_user_id)
 
     cleanup_expired_sessions()
+
+
+def _seed_rbac_and_settings(conn: sqlite3.Connection) -> None:
+    """Seed initial permissions, system roles, role-permission links, and default settings."""
+    try:
+        from core.rbac import DEFAULT_PERMISSIONS, DEFAULT_ROLES, DEFAULT_SYSTEM_SETTINGS
+
+        # 1. Seed Permissions
+        for p in DEFAULT_PERMISSIONS:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO permissions (name, resource, action, description)
+                VALUES (?, ?, ?, ?)
+                """,
+                (p["name"], p["resource"], p["action"], p["description"]),
+            )
+
+        # 2. Seed System Roles
+        for rname, rdata in DEFAULT_ROLES.items():
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO roles (name, description, is_system)
+                VALUES (?, ?, ?)
+                """,
+                (rname, rdata["description"], rdata["is_system"]),
+            )
+
+        # 3. Seed Role Permissions
+        for rname, rdata in DEFAULT_ROLES.items():
+            r_cur = conn.execute("SELECT id FROM roles WHERE name = ?", (rname,))
+            r_row = r_cur.fetchone()
+            if not r_row:
+                continue
+            r_id = r_row[0]
+            for pname in rdata["permissions"]:
+                p_cur = conn.execute("SELECT id FROM permissions WHERE name = ?", (pname,))
+                p_row = p_cur.fetchone()
+                if p_row:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+                        (r_id, p_row[0]),
+                    )
+
+        # 4. Seed System Settings
+        for k, v in DEFAULT_SYSTEM_SETTINGS.items():
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO system_settings (key, value, description)
+                VALUES (?, ?, ?)
+                """,
+                (k, v["value"], v["description"]),
+            )
+
+        # 5. Bootstrap Super Admin for pre-existing users if none exists
+        sa_cur = conn.execute("SELECT id FROM roles WHERE name = 'Super Admin'")
+        sa_row = sa_cur.fetchone()
+        if sa_row:
+            sa_role_id = sa_row[0]
+            sa_users_cur = conn.execute("SELECT COUNT(*) FROM user_roles WHERE role_id = ?", (sa_role_id,))
+            if sa_users_cur.fetchone()[0] == 0:
+                earliest_cur = conn.execute("SELECT MIN(id) FROM users")
+                earliest_row = earliest_cur.fetchone()
+                if earliest_row and earliest_row[0] is not None:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)",
+                        (earliest_row[0], sa_role_id),
+                    )
+
+        # 6. Assign default 'User' role to any existing users who lack a role
+        conn.execute("""
+            INSERT OR IGNORE INTO user_roles (user_id, role_id)
+            SELECT u.id, (SELECT id FROM roles WHERE name = 'User')
+            FROM users u
+            WHERE u.id NOT IN (SELECT user_id FROM user_roles)
+        """)
+    except Exception:
+        pass
 
 
 def _backfill_fts_and_documents_if_needed(conn: sqlite3.Connection, default_user_id: Optional[int] = None) -> None:
@@ -280,6 +464,22 @@ def cleanup_expired_sessions() -> int:
             return cursor.rowcount
     except Exception:
         return 0
+
+
+def update_user_avatar(user_id: int, avatar: Optional[str]) -> bool:
+    """Update profile picture/avatar data string (or None) for a user."""
+    with sqlite3.connect(SQLITE_DB_PATH) as conn:
+        conn.execute("UPDATE users SET avatar = ? WHERE id = ?", (avatar, user_id))
+        conn.commit()
+        return True
+
+
+def get_user_avatar(user_id: int) -> Optional[str]:
+    """Retrieve profile picture/avatar data string (or None) for a user."""
+    with sqlite3.connect(SQLITE_DB_PATH) as conn:
+        cursor = conn.execute("SELECT avatar FROM users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        return row[0] if row else None
 
 
 # Run database initialization at startup

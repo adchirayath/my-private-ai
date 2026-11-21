@@ -4,6 +4,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 # Modular package imports
+from routers.admin import router as admin_router
 from routers.auth import router as auth_router
 from routers.chat import router as chat_router
 from routers.files import router as files_router
@@ -64,11 +65,30 @@ app.include_router(models_router)
 app.include_router(auth_router)
 app.include_router(files_router)
 app.include_router(chat_router)
+app.include_router(admin_router)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def home():
     """Serve the single-page application frontend."""
+    return FileResponse("static/index.html")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Serve the browser tab icon."""
+    return FileResponse("static/favicon.ico", media_type="image/x-icon")
+
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+def apple_touch_icon():
+    """Serve the touch icon for mobile and bookmark shortcuts."""
+    return FileResponse("static/apple-touch-icon.png", media_type="image/png")
+
+
+@app.api_route("/admin", methods=["GET", "HEAD"])
+def admin_page():
+    """Serve the Admin Dashboard."""
     return FileResponse("static/index.html")
 
 

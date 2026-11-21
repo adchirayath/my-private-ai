@@ -72,18 +72,38 @@ def create_session(user_id: int, username: str, days_valid: int = 30) -> str:
     return token
 
 
-def register_user(username: str, password: str) -> dict:
+def get_db_path():
+    """Retrieve dynamic database path, supporting test monkeypatching."""
+    import core.db as db_mod
+    return getattr(db_mod, "SQLITE_DB_PATH", SQLITE_DB_PATH)
+
+
+def register_user(username: str, password: str, ip_address: Optional[str] = None) -> dict:
     """
     Register a new user account with bcrypt password hashing.
     If this is the first user account in the system, any pre-existing
-    unassigned chat history is automatically adopted by this user.
+    unassigned chat history is automatically adopted, and the user is
+    granted the Super Admin role. Subsequent users receive the default role.
     """
+    from core.audit import log_audit_event
+
     clean_username = validate_username(username)
     clean_password = validate_password(password)
     pw_hash = hash_password(clean_password)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    db_path = get_db_path()
 
-    with sqlite3.connect(SQLITE_DB_PATH) as conn:
+    with sqlite3.connect(db_path, timeout=10.0) as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
+        # Check registration setting if users already exist
+        cursor = conn.execute("SELECT COUNT(*) FROM users")
+        existing_users_count = cursor.fetchone()[0]
+        if existing_users_count > 0:
+            reg_setting_cur = conn.execute("SELECT value FROM system_settings WHERE key = 'allow_registration'")
+            reg_row = reg_setting_cur.fetchone()
+            if reg_row and reg_row[0].strip().lower() == "false":
+                raise ValueError("User registration is currently disabled by system administrator.")
+
         # Check if username is already taken
         cursor = conn.execute(
             "SELECT id FROM users WHERE username = ? COLLATE NOCASE",
@@ -94,12 +114,15 @@ def register_user(username: str, password: str) -> dict:
 
         # Insert user
         cursor = conn.execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-            (clean_username, pw_hash),
+            """
+            INSERT INTO users (username, password_hash, is_active, created_at, updated_at)
+            VALUES (?, ?, 1, ?, ?)
+            """,
+            (clean_username, pw_hash, now_iso, now_iso),
         )
         user_id = cursor.lastrowid
 
-        # Check total users count: if this is the very first user, claim legacy messages and documents
+        # Check total users count: if this is the very first user, claim legacy messages, documents, and assign Super Admin
         cursor = conn.execute("SELECT COUNT(*) FROM users")
         total_users = cursor.fetchone()[0]
         if total_users == 1:
@@ -129,53 +152,132 @@ def register_user(username: str, password: str) -> dict:
             except Exception:
                 pass
 
+            # Assign Super Admin role to the first user
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO user_roles (user_id, role_id)
+                SELECT ?, id FROM roles WHERE name = 'Super Admin'
+                """,
+                (user_id,),
+            )
+        else:
+            # Assign default role to subsequent users
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO user_roles (user_id, role_id)
+                SELECT ?, id FROM roles WHERE name = (
+                    SELECT COALESCE((SELECT value FROM system_settings WHERE key = 'default_role'), 'User')
+                )
+                """,
+                (user_id,),
+            )
+
         conn.commit()
+
+    log_audit_event(
+        action="user.register",
+        resource="auth",
+        user_id=user_id,
+        username=clean_username,
+        details={"first_user": total_users == 1},
+        ip_address=ip_address,
+    )
 
     token = create_session(user_id, clean_username)
     return {
         "user_id": user_id,
         "username": clean_username,
         "token": token,
+        "avatar": None,
     }
 
 
-def login_user(username: str, password: str) -> Optional[dict]:
+def login_user(username: str, password: str, ip_address: Optional[str] = None) -> Optional[dict]:
     """Verify credentials and return user info + new session token if successful."""
+    from core.audit import log_audit_event
+
     clean_username = (username or "").strip()
     if not clean_username or not password:
         return None
 
-    with sqlite3.connect(SQLITE_DB_PATH) as conn:
+    db_path = get_db_path()
+    with sqlite3.connect(db_path, timeout=10.0) as conn:
         cursor = conn.execute(
-            "SELECT id, username, password_hash FROM users WHERE username = ? COLLATE NOCASE",
+            """
+            SELECT id, username, password_hash, avatar, COALESCE(is_active, 1)
+            FROM users
+            WHERE username = ? COLLATE NOCASE
+            """,
             (clean_username,),
         )
         row = cursor.fetchone()
         if not row:
+            log_audit_event(
+                action="auth.login_failed",
+                resource="auth",
+                username=clean_username,
+                details={"reason": "User not found"},
+                ip_address=ip_address,
+            )
             return None
 
-        user_id, db_username, db_hash = row
+        user_id, db_username, db_hash, db_avatar, is_active = row
         if not verify_password(password, db_hash):
+            log_audit_event(
+                action="auth.login_failed",
+                resource="auth",
+                user_id=user_id,
+                username=db_username,
+                details={"reason": "Invalid credentials"},
+                ip_address=ip_address,
+            )
             return None
+
+        if not is_active:
+            log_audit_event(
+                action="auth.login_failed",
+                resource="auth",
+                user_id=user_id,
+                username=db_username,
+                details={"reason": "Account deactivated"},
+                ip_address=ip_address,
+            )
+            raise ValueError("Your account has been deactivated. Please contact an administrator.")
+
+        # Update last login timestamp
+        now_iso = datetime.now(timezone.utc).isoformat()
+        conn.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (now_iso, user_id))
+        conn.commit()
+
+    log_audit_event(
+        action="auth.login",
+        resource="auth",
+        user_id=user_id,
+        username=db_username,
+        details={"status": "success"},
+        ip_address=ip_address,
+    )
 
     token = create_session(user_id, db_username)
     return {
         "user_id": user_id,
         "username": db_username,
         "token": token,
+        "avatar": db_avatar,
     }
 
 
 def get_user_by_token(token: str) -> Optional[dict]:
-    """Look up a user by session token, verifying that the session has not expired."""
+    """Look up a user by session token, verifying active status and unexpired session."""
     if not token or not isinstance(token, str):
         return None
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    with sqlite3.connect(SQLITE_DB_PATH) as conn:
+    db_path = get_db_path()
+    with sqlite3.connect(db_path, timeout=10.0) as conn:
         cursor = conn.execute(
             """
-            SELECT s.user_id, s.username, s.expires_at
+            SELECT s.user_id, s.username, s.expires_at, u.avatar, COALESCE(u.is_active, 1)
             FROM sessions s
             JOIN users u ON s.user_id = u.id
             WHERE s.token = ?
@@ -186,28 +288,52 @@ def get_user_by_token(token: str) -> Optional[dict]:
         if not row:
             return None
 
-        user_id, username, expires_str = row
+        user_id, username, expires_str, avatar, is_active = row
         if expires_str < now_iso:
             # Expired session cleanup
             conn.execute("DELETE FROM sessions WHERE token = ?", (token.strip(),))
             conn.commit()
             return None
 
-        return {"id": user_id, "username": username}
+        if not is_active:
+            # Terminate sessions for deactivated accounts
+            conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            conn.commit()
+            return None
+
+        return {"id": user_id, "username": username, "avatar": avatar, "is_active": bool(is_active)}
 
 
-def logout_user(token: str) -> None:
-    """Invalidate an active session token."""
+def logout_user(token: str, ip_address: Optional[str] = None) -> None:
+    """Invalidate an active session token and log logout audit event."""
+    from core.audit import log_audit_event
+
     if not token:
         return
-    with sqlite3.connect(SQLITE_DB_PATH) as conn:
+    db_path = get_db_path()
+    user_info = None
+    with sqlite3.connect(db_path, timeout=10.0) as conn:
+        cur = conn.execute("SELECT user_id, username FROM sessions WHERE token = ?", (token.strip(),))
+        row = cur.fetchone()
+        if row:
+            user_info = {"id": row[0], "username": row[1]}
         conn.execute("DELETE FROM sessions WHERE token = ?", (token.strip(),))
         conn.commit()
+
+    if user_info:
+        log_audit_event(
+            action="auth.logout",
+            resource="auth",
+            user_id=user_info["id"],
+            username=user_info["username"],
+            ip_address=ip_address,
+        )
 
 
 def get_user_count() -> int:
     """Return total number of registered users."""
-    with sqlite3.connect(SQLITE_DB_PATH) as conn:
+    db_path = get_db_path()
+    with sqlite3.connect(db_path, timeout=10.0) as conn:
         cursor = conn.execute("SELECT COUNT(*) FROM users")
         return cursor.fetchone()[0]
 
